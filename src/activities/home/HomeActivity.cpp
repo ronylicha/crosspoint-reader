@@ -154,7 +154,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       GUI.fillPopupProgress(renderer, popupRect, 0);
     }
-    if (xtc.load() && xtc->generateThumbBmp(height)) {
+    if (xtc->load() && xtc->generateThumbBmp(height)) {
       return;
     }
   }
