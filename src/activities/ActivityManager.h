@@ -17,7 +17,7 @@
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU };
+enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, GAMES, SETTINGS_MENU };
 
 /**
  * ActivityManager
@@ -85,6 +85,7 @@ class ActivityManager {
   void goToJoinNetwork();  // File Transfer straight into Join Network (post heap-defrag reboot)
   void goToUsbDrive();
   void goToSettings();
+  void goToGames();
   void goToFileBrowser(std::string path = {});
   void goToLibrary();
   void goToBrowser();
