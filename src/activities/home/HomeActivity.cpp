@@ -28,7 +28,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Library, File transfer, Settings
+  int count = 5;  // File Browser, Library, File transfer, Games, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -154,7 +154,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       GUI.fillPopupProgress(renderer, popupRect, 0);
     }
-    if (xtc->load() && xtc->generateThumbBmp(height)) {
+    if (xtc.load() && xtc->generateThumbBmp(height)) {
       return;
     }
   }
@@ -321,6 +321,9 @@ void HomeActivity::loop() {
         break;
       case HomeMenuItem::FILE_TRANSFER:
         onFileTransferOpen();
+        break;
+      case HomeMenuItem::GAMES:
+        onGamesOpen();
         break;
       case HomeMenuItem::SETTINGS_MENU:
         onSettingsOpen();
@@ -522,9 +525,9 @@ void HomeActivity::render(RenderLock&&) {
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_FILE_TRANSFER),
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_FILE_TRANSFER), tr(STR_GAMES),
                                         tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Settings};
+  std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Blocks, Settings};
 
   if (hasLibrarySlot()) {
     menuItems.insert(menuItems.begin() + 2, hasPlugins ? tr(STR_PLUGINS) : tr(STR_OPDS_BROWSER));
@@ -570,6 +573,8 @@ void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
+
+void HomeActivity::onGamesOpen() { activityManager.goToGames(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
