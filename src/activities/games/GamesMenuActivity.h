@@ -3,7 +3,7 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
-// Entry point for the bundled board games (chess and checkers).
+// Entry point for the bundled board games (chess, checkers, backgammon).
 // Lets the user pick a game and a mode (2 players on the same device,
 // or against a simple built-in AI).
 class GamesMenuActivity final : public Activity {
@@ -21,7 +21,7 @@ class GamesMenuActivity final : public Activity {
   int menuRowHeight = 0;
   ButtonNavigator buttonNavigator;
 
-  static constexpr int ITEM_COUNT = 4;
+  static constexpr int ITEM_COUNT = 6;
   std::string labelFor(int index) const;
   void launchSelected() const;
 };
