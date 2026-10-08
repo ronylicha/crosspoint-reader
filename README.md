@@ -33,14 +33,16 @@ Tout le firmware CrossPoint 1.6.5 officiel, **plus** :
 - **Un élément « Jeux »** dans le menu d'accueil (entre « Transfert de fichiers » et « Réglages »).
 - **Échecs** complets :
   - Mode 2 joueurs (sur le même écran) ou contre l'IA.
-  - Coups légaux complets : roque, prise en passant, promotion (automatique en dame).
+  - Véritables silhouettes de pièces standard (roi, dame, tour, fou, cavalier, pion).
+  - Coups légaux complets : roque, prise en passant, promotion **au choix** (dame, cavalier, tour ou fou).
   - Détection d'échec, échec et mat, pat.
   - Indicateurs visuels des coups légaux après sélection d'une pièce.
-  - IA : évaluation matérielle + bonus de contrôle du centre, avec une part d'aléatoire.
+  - IA renforcée : recherche alpha-bêta (profondeur 3) avec tables positionnelles, tri MVV-LVA et une part d'aléatoire à égalité.
 - **Dames internationales (10×10)** :
   - Mode 2 joueurs ou contre l'IA.
   - Prise obligatoire avec **règle de la prise majoritaire**.
-  - Rafles (prises en chaîne), dames volantes, promotion en dame.
+  - Rafles (prises en chaîne), dames volantes, promotion en dame marquée d'une **couronne**.
+  - IA renforcée : recherche alpha-bêta (profondeur 6) avec évaluation positionnelle.
 - **Interface tactile** adaptée au X4 Pro : touchez une pièce puis sa destination, ou utilisez les boutons (curseur + Confirmer). Bouton Retour pour désélectionner / quitter.
 - **Traductions** française et anglaise de toute l'interface des jeux.
 
