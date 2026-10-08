@@ -22,10 +22,12 @@ Quatre entrées :
 
 ## Échecs
 
-- Règles complètes : roque (petit et grand), prise en passant, promotion automatique en dame.
+- **Pièces dessinées** : les pièces utilisent de véritables silhouettes standard (roi, dame, tour, fou, cavalier, pion), blanches ou noires, et non de simples jetons.
+- Règles complètes : roque (petit et grand), prise en passant, promotion.
+- **Promotion au choix** : quand un pion atteint la dernière rangée, un menu s'affiche pour choisir la pièce — **dame, cavalier, tour ou fou** (naviguez avec Gauche/Droite ou touchez directement la pièce, puis Confirmer ; Retour annule).
 - Seuls les coups légaux sont jouables : impossible de laisser son roi en échec, de roquer en passant par une case attaquée, etc.
 - États affichés dans l'en-tête : trait (blancs/noirs), **Échec !**, **Échec et mat !**, **Pat - partie nulle**.
-- IA : recherche à 1 coup avec évaluation matérielle (pion 100, cavalier 320, fou 330, tour 500, dame 900), bonus de contrôle du centre et une pointe d'aléatoire pour varier les parties.
+- **IA renforcée** : recherche alpha-bêta en profondeur 3 avec tables positionnelles (piece-square tables), tri des coups MVV-LVA (captures et promotions en priorité), détection de mat/pat et une pointe d'aléatoire à égalité pour varier les parties.
 
 ## Dames (internationales, 10×10)
 
@@ -34,10 +36,6 @@ Quatre entrées :
 - **Prise majoritaire** : quand plusieurs prises sont possibles, celle qui capture le plus de pièces est imposée.
 - **Rafles** : les prises en chaîne se jouent en une fois (la destination finale est proposée directement).
 - **Dames volantes** : une dame se déplace et capture à n'importe quelle distance en diagonale.
-- Un pion atteignant la dernière rangée est promu dame ; une prise qui couronne s'arrête là.
+- Un pion atteignant la dernière rangée est promu dame — le jeton affiche alors une **couronne** ; une prise qui couronne s'arrête là.
 - États affichés : trait, **Prise obligatoire**, victoire des blancs/des noirs.
-- IA : privilégie les prises majoritaires, la capture de dames, la promotion et l'avancement.
-
-## Note technique
-
-Les jeux sont des *activities* FreeInkUI standard (`src/activities/games/`), compilés pour la cible `x4pro`. L'aléatoire de l'IA utilise le générateur matériel ESP32 (`esp_random()`). L'affichage utilise le rafraîchissement rapide de l'écran e-ink, avec un rafraîchissement partiel périodique pour limiter les artefacts.
+- **IA renforcée** : recherche alpha-bêta en profondeur 6 (les captures sont explorées en priorité), évaluation prenant en compte le matériel, l'avancement des pions, la garde de la dernière rangée et les dames, avec choix aléatoire entre les coups équivalents.
