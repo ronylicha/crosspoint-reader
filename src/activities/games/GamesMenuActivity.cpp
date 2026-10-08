@@ -4,6 +4,7 @@
 #include <HalDisplay.h>
 #include <I18n.h>
 
+#include "BackgammonActivity.h"
 #include "CheckersActivity.h"
 #include "ChessActivity.h"
 #include "components/UITheme.h"
@@ -16,7 +17,7 @@ void GamesMenuActivity::onEnter() {
 
 std::string GamesMenuActivity::labelFor(const int index) const {
   char buf[64];
-  const char* game = (index < 2) ? tr(STR_CHESS) : tr(STR_CHECKERS);
+  const char* game = (index < 2) ? tr(STR_CHESS) : (index < 4) ? tr(STR_CHECKERS) : tr(STR_BACKGAMMON);
   const char* mode = (index % 2 == 0) ? tr(STR_TWO_PLAYERS) : tr(STR_VS_AI);
   snprintf(buf, sizeof(buf), "%s - %s", game, mode);
   return std::string(buf);
@@ -26,8 +27,10 @@ void GamesMenuActivity::launchSelected() const {
   const bool vsAi = (selectorIndex % 2) == 1;
   if (selectorIndex < 2) {
     activityManager.pushActivity(std::make_unique<ChessActivity>(renderer, mappedInput, vsAi));
-  } else {
+  } else if (selectorIndex < 4) {
     activityManager.pushActivity(std::make_unique<CheckersActivity>(renderer, mappedInput, vsAi));
+  } else {
+    activityManager.pushActivity(std::make_unique<BackgammonActivity>(renderer, mappedInput, vsAi));
   }
 }
 
