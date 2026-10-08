@@ -27,16 +27,16 @@ inline void scalePoly(const int* xs, const int* ys, const int n, const int x, co
 
 inline void poly(GfxRenderer& r, const int* xs, const int* ys, const int n, const int x, const int y, const int s,
                  const bool black) {
-  int px[16];
-  int py[16];
+  int px[24];
+  int py[24];
   scalePoly(xs, ys, n, x, y, s, px, py);
   r.fillPolygon(px, py, n, black);
 }
 
 inline void polyOutline(GfxRenderer& r, const int* xs, const int* ys, const int n, const int x, const int y,
                         const int s, const bool black) {
-  int px[16];
-  int py[16];
+  int px[24];
+  int py[24];
   scalePoly(xs, ys, n, x, y, s, px, py);
   for (int i = 0; i < n; i++) {
     const int j = (i + 1) % n;
