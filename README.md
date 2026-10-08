@@ -16,13 +16,13 @@ Ce fork suit le versionning officiel de CrossPoint Reader :
 
 ### Automatisation
 
-Un workflow GitHub Actions (`automation/sync-upstream.yml`) automatise la resynchronisation :
+Un workflow GitHub Actions (`.github/workflows/sync-upstream.yml`, actif sur la branche `develop`) automatise la resynchronisation :
 
 1. Chaque jour, il vérifie si une nouvelle release officielle de CrossPoint est sortie.
 2. Si oui : merge de l'upstream dans `games-x4pro`, compilation du firmware X4 Pro, puis publication automatique de la release `v<version>-games.1` avec `firmware-x4pro-jeux.bin` en pièce jointe.
 3. En cas de conflit de merge, il ouvre automatiquement un ticket sur ce dépôt avec les instructions de résolution manuelle.
 
-**Activation** : déplacez `automation/sync-upstream.yml` vers `.github/workflows/sync-upstream.yml` (via l'interface web GitHub : ouvrez le fichier, crayon *Edit*, renommez le chemin, *Commit changes*), puis activez les Actions dans l'onglet **Actions** du fork. Un déclenchement manuel est possible via *Run workflow* (avec option `force_version` pour viser une version précise).
+Le workflow est actif sur la branche par défaut `develop`. Un déclenchement manuel est possible via l'onglet **Actions** → *Run workflow* (avec option `force_version` pour viser une version précise).
 
 > Note : GitHub désactive les workflows planifiés après 60 jours d'inactivité du dépôt ; un simple commit ou déclenchement manuel les réactive.
 
@@ -116,7 +116,7 @@ Détails : [docs/jeux.md](./docs/jeux.md).
 ### Build
 
 ```bash
-git clone --recursive -b games-x4pro https://github.com/ronylicha/crosspoint-reader
+git clone --recursive https://github.com/ronylicha/crosspoint-reader
 cd crosspoint-reader
 
 # si cloné sans --recursive :

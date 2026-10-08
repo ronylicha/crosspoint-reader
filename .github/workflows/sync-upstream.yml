@@ -1,7 +1,7 @@
 name: Sync upstream CrossPoint release
 
 # Vérifie chaque jour si une nouvelle release officielle de CrossPoint Reader
-# est sortie. Si oui : merge de l'upstream dans games-x4pro, build du firmware
+# est sortie. Si oui : merge de l'upstream dans develop, build du firmware
 # X4 Pro, puis publication d'une release v<version>-games.N avec le .bin.
 # Déclenchement manuel possible depuis l'onglet Actions (workflow_dispatch).
 
@@ -23,10 +23,10 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout du fork (branche games-x4pro)
+      - name: Checkout du fork (branche develop)
         uses: actions/checkout@v4
         with:
-          ref: games-x4pro
+          ref: develop
           fetch-depth: 0
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -69,7 +69,7 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Merge de l'upstream dans games-x4pro
+      - name: Merge de l'upstream dans develop
         if: steps.check.outputs.needed == 'true'
         id: merge
         run: |
@@ -92,7 +92,7 @@ jobs:
 
           À faire manuellement :
           \`\`\`bash
-          git checkout games-x4pro
+          git checkout develop
           git fetch https://github.com/crosspoint-reader/crosspoint-reader.git --tags
           git merge ${UPSTREAM_TAG}
           # résoudre les conflits, puis :
@@ -123,7 +123,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          git push origin games-x4pro
+          git push origin develop
 
           # Itération : -games.1 sauf si le tag existe déjà (-> .2, .3...)
           N=1
@@ -137,8 +137,9 @@ jobs:
 
           ## Contenu du fork
           - Menu **Jeux** sur l'écran d'accueil
-          - **Échecs** : 2 joueurs ou contre l'IA (roque, en passant, promotion, mat/pat)
-          - **Dames internationales 10×10** : 2 joueurs ou contre l'IA (prise majoritaire, rafles, dames volantes)
+          - **Échecs** : 2 joueurs ou contre l'IA — silhouettes standard, promotion au choix (dame/cavalier/tour/fou), IA alpha-bêta
+          - **Dames internationales 10×10** : 2 joueurs ou contre l'IA — prise majoritaire, rafles, dames volantes, couronne, IA alpha-bêta
+          - **Backgammon** : 2 joueurs ou contre l'IA — doublets, barre, sortie des pions, IA par énumération des séquences
           - Interface tactile + boutons, traductions FR/EN
 
           ## Installation
@@ -151,7 +152,7 @@ jobs:
 
           gh release create "$TAG" \
             --repo ronylicha/crosspoint-reader \
-            --target games-x4pro \
-            --title "CrossPoint Reader ${UPSTREAM_TAG} + Jeux (X4 Pro)" \
+            --target develop \
+            --title "v${UPSTREAM_TAG}-games.${N} — Échecs, Dames & Backgammon (X4 Pro)" \
             --notes-file /tmp/notes.md \
             ".pio/build/x4pro/firmware.bin#firmware-x4pro-jeux.bin"
