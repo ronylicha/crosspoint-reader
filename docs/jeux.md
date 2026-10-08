@@ -12,6 +12,8 @@ Quatre entrées :
 | Échecs - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
 | Dames - 2 joueurs | Dames internationales 10×10, deux joueurs |
 | Dames - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
+| Backgammon - 2 joueurs | Backgammon classique, deux joueurs |
+| Backgammon - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
 
 ## Commandes
 
@@ -39,3 +41,12 @@ Quatre entrées :
 - Un pion atteignant la dernière rangée est promu dame — le jeton affiche alors une **couronne** ; une prise qui couronne s'arrête là.
 - États affichés : trait, **Prise obligatoire**, victoire des blancs/des noirs.
 - **IA renforcée** : recherche alpha-bêta en profondeur 6 (les captures sont explorées en priorité), évaluation prenant en compte le matériel, l'avancement des pions, la garde de la dernière rangée et les dames, avec choix aléatoire entre les coups équivalents.
+
+## Backgammon
+
+- Règles complètes : dés (le doublet se joue 4 fois), **pion battu envoyé sur la barre**, **rentrée obligatoire depuis la barre** avant tout autre coup, **sortie des pions** (bearing off) avec règle du dé supérieur.
+- Si un seul des deux dés est jouable, le **dé le plus fort est imposé**, comme le veut la règle.
+- **Commandes** : touchez l'écran (ou Confirmer) pour lancer les dés ; touchez un de vos pions pour le sélectionner — les destinations légales sont marquées d'un point — puis touchez la destination. Pour sortir un pion, sélectionnez-le puis touchez la barre centrale de votre côté.
+- Les pions sortis sont comptés au centre (blancs en bas, noirs en haut) ; les pions sur la barre sont affichés sur la colonne centrale.
+- « Aucun coup possible » s'affiche quand les dés ne permettent aucun mouvement : le tour passe automatiquement.
+- **IA** : énumération exhaustive de toutes les séquences de coups légales pour le jet de dés, chaque position finale étant notée (pip count, pions isolés, points faits, barre, sorties) — l'IA joue la meilleure.
