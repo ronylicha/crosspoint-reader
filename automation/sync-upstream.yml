@@ -1,0 +1,157 @@
+name: Sync upstream CrossPoint release
+
+# Vérifie chaque jour si une nouvelle release officielle de CrossPoint Reader
+# est sortie. Si oui : merge de l'upstream dans games-x4pro, build du firmware
+# X4 Pro, puis publication d'une release v<version>-games.N avec le .bin.
+# Déclenchement manuel possible depuis l'onglet Actions (workflow_dispatch).
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # tous les jours à 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: "Forcer une version upstream précise (ex. 1.6.6). Vide = dernière release officielle."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du fork (branche games-x4pro)
+        uses: actions/checkout@v4
+        with:
+          ref: games-x4pro
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Config git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Récupérer l'upstream et déterminer la dernière release officielle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force_version }}
+        run: |
+          set -e
+          git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git || true
+          git fetch upstream --tags
+
+          if [ -n "$FORCE" ]; then
+            UPSTREAM_TAG="$FORCE"
+          else
+            # releases/latest = dernière release non-prerelease de l'upstream
+            UPSTREAM_TAG=$(gh api repos/crosspoint-reader/crosspoint-reader/releases/latest --jq .tag_name)
+          fi
+          echo "Dernière release officielle : $UPSTREAM_TAG"
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
+
+          # Dernière version upstream déjà intégrée au fork (tags vX.Y.Z-games.N)
+          LAST=$(git tag -l 'v*-games.*' | sed 's/^v//; s/-games\./ /' | sort -V -k1,1 -k2,2n | tail -1 | cut -d' ' -f1)
+          echo "Dernière base intégrée : ${LAST:-aucune}"
+
+      - name: Vérifier si une resynchronisation est nécessaire
+        id: check
+        run: |
+          if [ -n "$LAST" ] && [ "$(printf '%s\n%s\n' "$LAST" "$UPSTREAM_TAG" | sort -V | tail -1)" = "$LAST" ]; then
+            echo "Le fork est déjà à jour ($LAST >= $UPSTREAM_TAG). Rien à faire."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nouvelle release officielle détectée : $UPSTREAM_TAG"
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge de l'upstream dans games-x4pro
+        if: steps.check.outputs.needed == 'true'
+        id: merge
+        run: |
+          set -e
+          if git merge --no-edit "$UPSTREAM_TAG"; then
+            echo "Merge réussi."
+          else
+            echo "::error::Conflit de merge avec l'upstream $UPSTREAM_TAG — intervention manuelle requise."
+            git merge --abort || true
+            exit 1
+          fi
+
+      - name: Ouvrir un ticket en cas de conflit
+        if: failure() && steps.check.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/issue.md <<EOF
+          La synchronisation automatique avec la release officielle **${UPSTREAM_TAG}** a échoué (conflits de merge, probablement dans HomeActivity/ActivityManager ou les fichiers i18n).
+
+          À faire manuellement :
+          \`\`\`bash
+          git checkout games-x4pro
+          git fetch https://github.com/crosspoint-reader/crosspoint-reader.git --tags
+          git merge ${UPSTREAM_TAG}
+          # résoudre les conflits, puis :
+          pio run -e x4pro
+          \`\`\`
+          EOF
+          gh issue create --title "⚠️ Conflit de merge avec CrossPoint $UPSTREAM_TAG" --body-file /tmp/issue.md || true
+          exit 1
+
+      - name: Cache PlatformIO
+        if: steps.check.outputs.needed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-
+
+      - name: Build du firmware X4 Pro
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          pip install platformio pyyaml
+          pio run -e x4pro
+          ls -la .pio/build/x4pro/firmware.bin
+
+      - name: Tag et release
+        if: steps.check.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git push origin games-x4pro
+
+          # Itération : -games.1 sauf si le tag existe déjà (-> .2, .3...)
+          N=1
+          while git rev-parse -q --verify "refs/tags/v${UPSTREAM_TAG}-games.${N}" >/dev/null; do N=$((N+1)); done
+          TAG="v${UPSTREAM_TAG}-games.${N}"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          cat > /tmp/notes.md <<EOF
+          Fork CrossPoint Reader + Jeux pour **Xteink X4 Pro**, resynchronisé sur la release officielle **${UPSTREAM_TAG}**.
+
+          ## Contenu du fork
+          - Menu **Jeux** sur l'écran d'accueil
+          - **Échecs** : 2 joueurs ou contre l'IA (roque, en passant, promotion, mat/pat)
+          - **Dames internationales 10×10** : 2 joueurs ou contre l'IA (prise majoritaire, rafles, dames volantes)
+          - Interface tactile + boutons, traductions FR/EN
+
+          ## Installation
+          1. Téléchargez \`firmware-x4pro-jeux.bin\` ci-dessous
+          2. Renommez-le en \`firmware.bin\`, copiez-le à la racine de la carte SD
+          3. Réglages → Mise à jour du firmware par carte SD
+
+          ⚠️ Xteink X4 Pro uniquement (ESP32-S3).
+          EOF
+
+          gh release create "$TAG" \
+            --repo ronylicha/crosspoint-reader \
+            --target games-x4pro \
+            --title "CrossPoint Reader ${UPSTREAM_TAG} + Jeux (X4 Pro)" \
+            --notes-file /tmp/notes.md \
+            ".pio/build/x4pro/firmware.bin#firmware-x4pro-jeux.bin"
