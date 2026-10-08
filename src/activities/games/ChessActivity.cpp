@@ -4,10 +4,12 @@
 #include <HalDisplay.h>
 #include <I18n.h>
 
+#include <algorithm>
 #include <cstdlib>
 
 #include <esp_random.h>
 
+#include "PieceArt.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -23,7 +25,82 @@ constexpr int8_t INITIAL_BOARD[64] = {
     4,  2,  3,  5,  6,  3,  2,  4,   //
 };
 constexpr int PIECE_VALUE[7] = {0, 100, 320, 330, 500, 900, 0};
-constexpr char PIECE_LETTER[7] = {' ', 'P', 'N', 'B', 'R', 'Q', 'K'};
+
+// Piece-square tables, white perspective, index 0 = a8 (top-left as drawn).
+// Black reads the vertically mirrored square.
+// clang-format off
+constexpr int PST_PAWN[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0,
+};
+constexpr int PST_KNIGHT[64] = {
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50,
+};
+constexpr int PST_BISHOP[64] = {
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20,
+};
+constexpr int PST_ROOK[64] = {
+     0,  0,  0,  0,  0,  0,  0,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     0,  0,  0,  5,  5,  0,  0,  0,
+};
+constexpr int PST_QUEEN[64] = {
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20,
+};
+constexpr int PST_KING[64] = {
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20,
+};
+// clang-format on
+
+const int* pstFor(const int type) {
+  switch (type) {
+    case 1: return PST_PAWN;
+    case 2: return PST_KNIGHT;
+    case 3: return PST_BISHOP;
+    case 4: return PST_ROOK;
+    case 5: return PST_QUEEN;
+    default: return PST_KING;
+  }
+}
 }  // namespace
 
 void ChessActivity::onEnter() {
@@ -43,6 +120,8 @@ void ChessActivity::reset() {
   gameOver = false;
   statusOverride = nullptr;
   aiPending = false;
+  promoCount = 0;
+  promoSel = 0;
   computeLegalMoves();
   targets.clear();
 }
@@ -81,8 +160,17 @@ void ChessActivity::genPseudo(const Position& p, const bool white, std::vector<M
         Move m;
         m.from = sq;
         m.to = to;
-        if (to / 8 == promoRow) m.promo = QUEEN;  // auto-queen
-        out.push_back(m);
+        if (to / 8 == promoRow) {
+          // One move per promotion choice; the UI offers the picker, the AI
+          // evaluates each option in its search.
+          for (const int pr : {QUEEN, KNIGHT, ROOK, BISHOP}) {
+            Move pm = m;
+            pm.promo = pr;
+            out.push_back(pm);
+          }
+        } else {
+          out.push_back(m);
+        }
       };
       if (row + dir >= 0 && row + dir <= 7 && p.b[(row + dir) * 8 + col] == EMPTY) {
         addPawnMove((row + dir) * 8 + col);
@@ -180,24 +268,29 @@ bool ChessActivity::inCheck(const Position& p, const bool white) const {
   return false;
 }
 
+bool ChessActivity::isLegalMove(const Position& p, const Move& m) const {
+  const bool white = p.whiteTurn;
+  // Castling may not pass through or out of check.
+  if (pieceOf(p.b[m.from]) == KING && (m.to - m.from == 2 || m.from - m.to == 2)) {
+    if (inCheck(p, white)) return false;
+    Position mid = p;
+    Move step;
+    step.from = m.from;
+    step.to = (m.from + m.to) / 2;
+    applyMove(mid, step);
+    if (inCheck(mid, white)) return false;
+  }
+  Position next = p;
+  applyMove(next, m);
+  return !inCheck(next, white);
+}
+
 void ChessActivity::computeLegalMoves() {
   std::vector<Move> pseudo;
   genPseudo(pos, pos.whiteTurn, pseudo);
   legalMoves.clear();
   for (const auto& m : pseudo) {
-    // Castling may not pass through or out of check.
-    if (pieceOf(pos.b[m.from]) == KING && (m.to - m.from == 2 || m.from - m.to == 2)) {
-      if (inCheck(pos, pos.whiteTurn)) continue;
-      Position mid = pos;
-      Move step;
-      step.from = m.from;
-      step.to = (m.from + m.to) / 2;
-      applyMove(mid, step);
-      if (inCheck(mid, pos.whiteTurn)) continue;
-    }
-    Position next = pos;
-    applyMove(next, m);
-    if (!inCheck(next, pos.whiteTurn)) legalMoves.push_back(m);
+    if (isLegalMove(pos, m)) legalMoves.push_back(m);
   }
 }
 
@@ -216,6 +309,7 @@ void ChessActivity::playMove(const Move& m) {
   applyMove(pos, m);
   selected = -1;
   targets.clear();
+  promoCount = 0;
   computeLegalMoves();
   updateStatusAfterMove();
 }
@@ -238,6 +332,12 @@ void ChessActivity::updateStatusAfterMove() {
   if (vsAi && !pos.whiteTurn) aiPending = true;
 }
 
+void ChessActivity::beginPromotionChoice(const Move* const* cands, const int count) {
+  promoCount = 0;
+  for (int i = 0; i < count && i < 4; i++) promoCands[promoCount++] = *cands[i];
+  promoSel = 0;
+}
+
 void ChessActivity::handleSquareChosen(const int square) {
   if (gameOver || (vsAi && !pos.whiteTurn)) return;
   const int piece = pos.b[square];
@@ -258,12 +358,27 @@ void ChessActivity::handleSquareChosen(const int square) {
     return;
   }
 
+  // Promotion? Several candidate moves share the same target square.
+  const Move* promo[4];
+  int n = 0;
+  const Move* plain = nullptr;
   for (const auto* m : targets) {
-    if (m->to == square) {
-      playMove(*m);
-      requestUpdate();
-      return;
+    if (m->to != square) continue;
+    if (m->promo != 0) {
+      if (n < 4) promo[n++] = m;
+    } else {
+      plain = m;
     }
+  }
+  if (n > 0) {
+    beginPromotionChoice(promo, n);
+    requestUpdate();
+    return;
+  }
+  if (plain) {
+    playMove(*plain);
+    requestUpdate();
+    return;
   }
 
   // Reselect another own piece, else cancel selection.
@@ -277,18 +392,69 @@ void ChessActivity::handleSquareChosen(const int square) {
   requestUpdate();
 }
 
+// ---------------------------------------------------------------------------
+// AI: negamax with alpha-beta pruning, MVV-LVA move ordering, PST evaluation.
+// ---------------------------------------------------------------------------
+
 int ChessActivity::evaluate(const Position& p) const {
   int score = 0;
   for (int i = 0; i < 64; i++) {
     const int piece = p.b[i];
     if (piece == EMPTY) continue;
-    const int value = PIECE_VALUE[pieceOf(piece)];
-    // Small centrality bonus to avoid aimless shuffling.
-    const int row = i / 8, col = i % 8;
-    const int center = 7 - (std::abs(2 * row - 7) + std::abs(2 * col - 7));
-    score += (piece > 0 ? value + center : -(value + center));
+    const int type = pieceOf(piece);
+    const int* table = pstFor(type);
+    if (piece > 0) {
+      score += PIECE_VALUE[type] + table[i];
+    } else {
+      const int mirror = (7 - i / 8) * 8 + (i % 8);
+      score -= PIECE_VALUE[type] + table[mirror];
+    }
   }
   return score;
+}
+
+int ChessActivity::search(Position& p, const int depth, int alpha, const int beta, const int ply) {
+  nodes++;
+  if (depth == 0 || nodes > NODE_LIMIT) {
+    const int eval = evaluate(p);
+    return p.whiteTurn ? eval : -eval;
+  }
+
+  std::vector<Move> pseudo;
+  genPseudo(p, p.whiteTurn, pseudo);
+
+  // Move ordering: promotions first, then captures by MVV-LVA.
+  std::vector<int> key(pseudo.size());
+  for (size_t i = 0; i < pseudo.size(); i++) {
+    const Move& m = pseudo[i];
+    int k = 0;
+    if (m.promo) k += 100000 + PIECE_VALUE[m.promo];
+    const int victim = p.b[m.to];
+    if (victim != EMPTY) k += 10000 + PIECE_VALUE[pieceOf(victim)] * 10 - PIECE_VALUE[pieceOf(p.b[m.from])];
+    key[i] = k;
+  }
+  std::vector<size_t> order(pseudo.size());
+  for (size_t i = 0; i < order.size(); i++) order[i] = i;
+  std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return key[a] > key[b]; });
+
+  bool anyLegal = false;
+  int best = -MATE - 1;
+  for (const size_t idx : order) {
+    const Move& m = pseudo[idx];
+    if (!isLegalMove(p, m)) continue;
+    anyLegal = true;
+    Position next = p;
+    applyMove(next, m);
+    const int score = -search(next, depth - 1, -beta, -alpha, ply + 1);
+    if (score > best) best = score;
+    if (score > alpha) alpha = score;
+    if (alpha >= beta) break;
+    if (nodes > NODE_LIMIT) break;
+  }
+  if (!anyLegal) {
+    return inCheck(p, p.whiteTurn) ? -MATE + ply : 0;
+  }
+  return best;
 }
 
 void ChessActivity::runAi() {
@@ -296,20 +462,27 @@ void ChessActivity::runAi() {
     aiPending = false;
     return;
   }
-  int bestScore = INT32_MIN;
-  const Move* best = nullptr;
+
+  nodes = 0;
+  int bestScore = -MATE - 1;
+  std::vector<const Move*> bestMoves;
   for (const auto& m : legalMoves) {
     Position next = pos;
     applyMove(next, m);
-    int score = -evaluate(next);  // black maximizes
-    score += static_cast<int>(esp_random() % 30);  // small randomness for variety
+    const int score = -search(next, AI_DEPTH - 1, -MATE, MATE, 1);
     if (score > bestScore) {
       bestScore = score;
-      best = &m;
+      bestMoves.clear();
+      bestMoves.push_back(&m);
+    } else if (score == bestScore) {
+      bestMoves.push_back(&m);
     }
   }
   aiPending = false;
-  if (best) playMove(*best);
+  if (!bestMoves.empty()) {
+    // Random pick among equally best moves for variety.
+    playMove(*bestMoves[esp_random() % bestMoves.size()]);
+  }
   requestUpdate();
 }
 
@@ -330,6 +503,47 @@ void ChessActivity::loop() {
   if (aiPending) {
     // One loop pass after the render that announced the AI turn.
     runAi();
+    return;
+  }
+
+  // Promotion picker swallows all input while open.
+  if (promoCount > 0) {
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
+      if (promoSel > 0) promoSel--;
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
+      if (promoSel < promoCount - 1) promoSel++;
+      requestUpdate();
+    });
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      promoCount = 0;
+      selected = -1;
+      targets.clear();
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      playMove(promoCands[promoSel]);
+      requestUpdate();
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      if (tx >= promoBoxX && tx < promoBoxX + promoBoxW && ty >= promoBoxY && ty < promoBoxY + promoBoxH) {
+        const int idx = (tx - promoBoxX) / (promoBoxW / 4);
+        if (idx >= 0 && idx < promoCount) {
+          playMove(promoCands[idx]);
+          requestUpdate();
+          return;
+        }
+      }
+      // Tap outside the picker cancels it.
+      promoCount = 0;
+      selected = -1;
+      targets.clear();
+      requestUpdate();
+    }
     return;
   }
 
@@ -396,20 +610,34 @@ void ChessActivity::loop() {
 // ---------------------------------------------------------------------------
 
 void ChessActivity::drawPiece(const int piece, const int x, const int y, const int size) const {
-  const int margin = size / 8;
-  const int tx = x + margin;
-  const int ty = y + margin;
-  const int ts = size - 2 * margin;
-  const bool white = piece > 0;
+  gameart::drawChessPiece(renderer, pieceOf(piece), piece > 0, x, y, size);
+}
 
-  renderer.fillRoundedRect(tx, ty, ts, ts, ts / 2, white ? White : Black);
-  renderer.drawRoundedRect(tx, ty, ts, ts, 2, ts / 2, !white);
+void ChessActivity::renderPromotionOverlay() {
+  // Centered row of 4 option boxes over the board.
+  const int cell = squareSize + 8;
+  promoBoxW = cell * 4 + 16;
+  promoBoxH = cell + 16;
+  promoBoxX = boardX + (squareSize * 8 - promoBoxW) / 2;
+  promoBoxY = boardY + (squareSize * 8 - promoBoxH) / 2;
 
-  char letter[2] = {PIECE_LETTER[pieceOf(piece)], '\0'};
-  const int fontId = UI_12_FONT_ID;
-  const int tw = renderer.getTextWidth(fontId, letter);
-  const int th = renderer.getTextHeight(fontId);
-  renderer.drawText(fontId, tx + (ts - tw) / 2, ty + (ts - th) / 2, letter, !white);
+  renderer.fillRoundedRect(promoBoxX, promoBoxY, promoBoxW, promoBoxH, 8, White);
+  renderer.drawRoundedRect(promoBoxX, promoBoxY, promoBoxW, promoBoxH, 2, 8, Black);
+
+  const bool white = pos.whiteTurn;
+  static const int ORDER[4] = {QUEEN, KNIGHT, ROOK, BISHOP};
+  for (int i = 0; i < promoCount; i++) {
+    const int cx = promoBoxX + 8 + i * cell;
+    const int cy = promoBoxY + 8;
+    if (i == promoSel) {
+      renderer.drawRect(cx - 2, cy - 2, cell + 4, cell + 4, 2, true);
+    }
+    // Draw the piece matching this candidate's promo code when possible.
+    int type = ORDER[i];
+    for (int j = 0; j < promoCount; j++)
+      if (promoCands[j].promo == ORDER[i]) type = promoCands[j].promo;
+    gameart::drawChessPiece(renderer, type, white, cx, cy, cell);
+  }
 }
 
 void ChessActivity::render(RenderLock&&) {
@@ -425,7 +653,9 @@ void ChessActivity::render(RenderLock&&) {
   const int statusY = metrics.headerHeight + 4;
   const char* status = statusOverride;
   if (!status) {
-    if (aiPending) {
+    if (promoCount > 0) {
+      status = tr(STR_PROMOTE_TO);
+    } else if (aiPending) {
       status = tr(STR_BLACK_PLAYS);
     } else {
       status = pos.whiteTurn ? tr(STR_WHITE_PLAYS) : tr(STR_BLACK_PLAYS);
@@ -476,8 +706,9 @@ void ChessActivity::render(RenderLock&&) {
   renderer.drawRect(boardX + cursorCol * squareSize + 2, boardY + cursorRow * squareSize + 2, squareSize - 4,
                     squareSize - 4, 1, true);
 
-  const auto labels = mappedInput.mapLabels(gameOver ? tr(STR_BACK) : tr(STR_BACK),
-                                            gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT), "", "");
+  if (promoCount > 0) renderPromotionOverlay();
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   // Periodic half refresh to clear e-ink ghosting.

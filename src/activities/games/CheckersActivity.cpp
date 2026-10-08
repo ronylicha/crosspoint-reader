@@ -9,6 +9,7 @@
 
 #include <esp_random.h>
 
+#include "PieceArt.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -113,34 +114,30 @@ void CheckersActivity::capturesFrom(const int8_t board[100], const int square, s
   }
 }
 
-void CheckersActivity::computeLegalMoves() {
-  legalMoves.clear();
-  const bool white = whiteTurn;
+void CheckersActivity::genMovesFor(const int8_t board[100], const bool white, std::vector<Move>& out) const {
+  out.clear();
 
   // Collect captures first (mandatory, and only the longest count).
   std::vector<Move> captures;
   for (int sq = 0; sq < 100; sq++) {
-    const int piece = b[sq];
+    const int piece = board[sq];
     if (piece == 0 || (piece > 0) != white) continue;
-    if (lockedPiece >= 0 && sq != lockedPiece) continue;
     std::vector<int8_t> path{static_cast<int8_t>(sq)};
     std::vector<int8_t> captured;
-    capturesFrom(b, sq, path, captured, captures);
+    capturesFrom(board, sq, path, captured, captures);
   }
 
   if (!captures.empty()) {
     size_t maxCap = 0;
     for (const auto& m : captures) maxCap = std::max(maxCap, m.captured.size());
     for (auto& m : captures)
-      if (m.captured.size() == maxCap) legalMoves.push_back(std::move(m));
+      if (m.captured.size() == maxCap) out.push_back(std::move(m));
     return;
   }
 
-  if (lockedPiece >= 0) return;  // a forced continuation must be a capture
-
   // Quiet moves.
   for (int sq = 0; sq < 100; sq++) {
-    const int piece = b[sq];
+    const int piece = board[sq];
     if (piece == 0 || (piece > 0) != white) continue;
     const int row = sq / 10;
     const int col = sq % 10;
@@ -148,10 +145,10 @@ void CheckersActivity::computeLegalMoves() {
       for (int d = 0; d < 4; d++) {
         int r = row + DR[d];
         int c = col + DC[d];
-        while (onBoard(r, c) && b[r * 10 + c] == 0) {
+        while (onBoard(r, c) && board[r * 10 + c] == 0) {
           Move m;
           m.path = {static_cast<int8_t>(sq), static_cast<int8_t>(r * 10 + c)};
-          legalMoves.push_back(m);
+          out.push_back(m);
           r += DR[d];
           c += DC[d];
         }
@@ -161,14 +158,26 @@ void CheckersActivity::computeLegalMoves() {
       for (const int dc : {-1, 1}) {
         const int r = row + forward;
         const int c = col + dc;
-        if (onBoard(r, c) && b[r * 10 + c] == 0) {
+        if (onBoard(r, c) && board[r * 10 + c] == 0) {
           Move m;
           m.path = {static_cast<int8_t>(sq), static_cast<int8_t>(r * 10 + c)};
-          legalMoves.push_back(m);
+          out.push_back(m);
         }
       }
     }
   }
+}
+
+void CheckersActivity::computeLegalMoves() {
+  if (lockedPiece >= 0) {
+    // A forced continuation must be a capture by the locked piece.
+    legalMoves.clear();
+    std::vector<int8_t> path{static_cast<int8_t>(lockedPiece)};
+    std::vector<int8_t> captured;
+    capturesFrom(b, lockedPiece, path, captured, legalMoves);
+    return;
+  }
+  genMovesFor(b, whiteTurn, legalMoves);
 }
 
 void CheckersActivity::rebuildTargets() {
@@ -275,28 +284,97 @@ void CheckersActivity::handleSquareChosen(const int square) {
   }
 }
 
+void CheckersActivity::applyOnBoard(int8_t board[100], const Move& m) {
+  const int from = m.path.front();
+  const int to = m.path.back();
+  const int piece = board[from];
+  board[from] = 0;
+  board[to] = piece;
+  for (const int8_t cap : m.captured) board[cap] = 0;
+  if (!isKing(piece) && (to / 10 == 0 || to / 10 == 9)) {
+    board[to] = piece > 0 ? 2 : -2;
+  }
+}
+
+int CheckersActivity::evalBoard(const int8_t board[100]) const {
+  // White perspective.
+  int score = 0;
+  for (int sq = 0; sq < 100; sq++) {
+    const int p = board[sq];
+    if (p == 0) continue;
+    const int row = sq / 10;
+    int v;
+    if (isKing(p)) {
+      v = 300;
+    } else {
+      // Men: material + advancement (moving towards promotion).
+      v = 100 + (p > 0 ? (9 - row) : row) * 6;
+      // Back-rank guard: a man on its home row keeps the king row protected.
+      if ((p > 0 && row == 9) || (p < 0 && row == 0)) v += 8;
+    }
+    score += p > 0 ? v : -v;
+  }
+  return score;
+}
+
+int CheckersActivity::searchBoard(const int8_t board[100], const bool white, const int depth, int alpha,
+                                  const int beta, const int ply) {
+  nodes++;
+  if (depth == 0 || nodes > NODE_LIMIT) {
+    const int eval = evalBoard(board);
+    return white ? eval : -eval;
+  }
+
+  std::vector<Move> moves;
+  genMovesFor(board, white, moves);
+  if (moves.empty()) return -MATE + ply;  // no moves: side to move loses
+
+  // Captures (already longest-only) first, bigger hauls first.
+  std::vector<size_t> order(moves.size());
+  for (size_t i = 0; i < order.size(); i++) order[i] = i;
+  std::sort(order.begin(), order.end(),
+            [&](size_t a, size_t b) { return moves[a].captured.size() > moves[b].captured.size(); });
+
+  int best = -MATE - 1;
+  for (const size_t idx : order) {
+    int8_t next[100];
+    memcpy(next, board, sizeof(next));
+    applyOnBoard(next, moves[idx]);
+    const int score = -searchBoard(next, !white, depth - 1, -beta, -alpha, ply + 1);
+    if (score > best) best = score;
+    if (score > alpha) alpha = score;
+    if (alpha >= beta) break;
+    if (nodes > NODE_LIMIT) break;
+  }
+  return best;
+}
+
 void CheckersActivity::runAi() {
   if (gameOver || whiteTurn || legalMoves.empty()) {
     aiPending = false;
     return;
   }
-  int bestScore = INT32_MIN;
-  const Move* best = nullptr;
+  nodes = 0;
+  int bestScore = -MATE - 1;
+  std::vector<const Move*> bestMoves;
   for (const auto& m : legalMoves) {
-    int score = static_cast<int>(m.captured.size()) * 100;
-    for (const int8_t cap : m.captured) score += isKing(b[cap]) ? 30 : 10;
-    // Prefer advancing and crowning.
-    const int to = m.path.back();
-    if (!isKing(b[m.path.front()]) && to / 10 == 9) score += 25;
-    score += (9 - to / 10);  // men advance downwards for black
-    score += static_cast<int>(esp_random() % 15);
+    int8_t next[100];
+    memcpy(next, b, sizeof(next));
+    applyOnBoard(next, m);
+    const int score = -searchBoard(next, true, AI_DEPTH - 1, -MATE, MATE, 1);
     if (score > bestScore) {
       bestScore = score;
-      best = &m;
+      bestMoves.clear();
+      bestMoves.push_back(&m);
+    } else if (score == bestScore) {
+      bestMoves.push_back(&m);
     }
   }
   aiPending = false;
-  if (best) playMove(*best);
+  if (!bestMoves.empty()) {
+    // Random pick among equally best moves for variety.
+    playMove(*bestMoves[esp_random() % bestMoves.size()]);
+  }
   requestUpdate();
 }
 
@@ -387,9 +465,9 @@ void CheckersActivity::drawPiece(const int piece, const int x, const int y, cons
   renderer.fillRoundedRect(tx, ty, ts, ts, ts / 2, white ? White : Black);
   renderer.drawRoundedRect(tx, ty, ts, ts, 2, ts / 2, !white);
   if (isKing(piece)) {
-    // Crown marker: an inner ring in the opposite color.
-    const int inset = ts / 4;
-    renderer.drawRoundedRect(tx + inset, ty + inset, ts - 2 * inset, ts - 2 * inset, 2, (ts - 2 * inset) / 2, !white);
+    // Crown marker in the opposite color.
+    const int inset = ts / 5;
+    gameart::drawCrown(renderer, tx + inset, ty + inset, ts - 2 * inset, white);
   }
 }
 
