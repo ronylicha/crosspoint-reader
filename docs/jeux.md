@@ -1,10 +1,10 @@
-# Jeux — Échecs et Dames (X4 Pro)
+# Jeux — Échecs, Dames et Backgammon (X4 Pro)
 
-Ce fork ajoute un menu **Jeux** à l'écran d'accueil de CrossPoint Reader, avec deux jeux exploitant l'écran tactile du Xteink X4 Pro.
+Ce fork ajoute un menu **Jeux** à l'écran d'accueil de CrossPoint Reader, avec trois jeux exploitant l'écran tactile du Xteink X4 Pro.
 
 ## Menu Jeux
 
-Quatre entrées :
+Six entrées :
 
 | Entrée | Description |
 |---|---|

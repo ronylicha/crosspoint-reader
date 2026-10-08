@@ -2,7 +2,7 @@
 
 > Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) qui ajoute un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon** (chacun en 2 joueurs ou contre l'IA), dédié au **Xteink X4 Pro** (ESP32-S3, écran tactile).
 
-**Version actuelle : 1.6.5-games.1** — basée sur CrossPoint Reader officiel **1.6.5**.
+**Version actuelle : 1.6.5-games.3** — basée sur CrossPoint Reader officiel **1.6.5**.
 
 ---
 
@@ -98,9 +98,10 @@ Flashez simplement la release officielle correspondante via https://crosspointre
 ## Utilisation des jeux
 
 1. Depuis l'écran d'accueil, ouvrez **Jeux**.
-2. Choisissez : **Échecs - 2 joueurs**, **Échecs - contre l'IA**, **Dames - 2 joueurs** ou **Dames - contre l'IA**.
+2. Choisissez parmi six entrées : **Échecs**, **Dames** ou **Backgammon**, chacun en mode **2 joueurs** ou **contre l'IA**.
 3. En jeu : touchez une pièce pour la sélectionner — les destinations légales s'affichent — puis touchez la destination. Aux dames, si une prise est obligatoire, « Prise obligatoire » s'affiche et seules les prises sont jouables.
-4. **Retour** : désélectionne la pièce, puis quitte la partie. Après une partie terminée (mat, pat ou victoire), **Confirmer** ou un appui relance une nouvelle partie.
+4. Au backgammon : touchez l'écran (ou Confirmer) pour lancer les dés, touchez un pion puis sa destination ; pour sortir un pion, touchez la barre centrale de votre côté après l'avoir sélectionné.
+5. **Retour** : désélectionne la pièce, puis quitte la partie. Après une partie terminée (mat, pat ou victoire), **Confirmer** ou un appui relance une nouvelle partie.
 
 Détails : [docs/jeux.md](./docs/jeux.md).
 
