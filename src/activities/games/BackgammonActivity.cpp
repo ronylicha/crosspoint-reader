@@ -38,6 +38,7 @@ void BackgammonActivity::reset() {
   whiteTurn = true;
   phase = ROLL;
   diceCount = 0;
+  diceRolledCount = 0;
   selected = -1;
   cursorPoint = 12;
   gameOver = false;
@@ -150,25 +151,61 @@ int BackgammonActivity::pipCount(const State& s, const bool white) {
   return pip;
 }
 
-void BackgammonActivity::playableDice(bool outMask[7]) const {
-  for (int i = 0; i < 7; i++) outMask[i] = false;
-  State probe = st;
-  for (int i = 0; i < diceCount; i++) {
-    const uint8_t d = diceLeft[i];
-    if (outMask[d]) continue;
-    std::vector<Step> tmp;
-    genSteps(probe, whiteTurn, d, tmp);
-    if (!tmp.empty()) outMask[d] = true;
-  }
-  // With two different dice and only one playable, the higher one is forced.
-  if (diceCount == 2 && diceLeft[0] != diceLeft[1]) {
-    const int a = diceLeft[0], b = diceLeft[1];
-    if (outMask[a] && outMask[b]) return;  // both playable: free choice
-    if (outMask[a] || outMask[b]) {
-      const int hi = a > b ? a : b;
-      const int lo = a > b ? b : a;
-      if (outMask[hi]) outMask[lo] = false;
+int BackgammonActivity::maxUsable(const State& s, const bool white, const uint8_t* dice, const int count) {
+  if (count <= 0) return 0;
+  int best = 0;
+  for (int i = 0; i < count; i++) {
+    const uint8_t d = dice[i];
+    bool seen = false;
+    for (int j = 0; j < i; j++)
+      if (dice[j] == d) seen = true;
+    if (seen) continue;
+    std::vector<Step> steps;
+    genSteps(s, white, d, steps);
+    for (const auto& m : steps) {
+      State next = s;
+      applyStep(next, white, m);
+      uint8_t rest[4];
+      int n = 0;
+      for (int j = 0; j < count; j++)
+        if (j != i) rest[n++] = dice[j];
+      const int total = 1 + maxUsable(next, white, rest, n);
+      if (total > best) best = total;
     }
+  }
+  return best;
+}
+
+void BackgammonActivity::legalFirstSteps(const State& s, const bool white, const uint8_t* dice, const int count,
+                                         std::vector<Step>& out) {
+  out.clear();
+  if (count <= 0) return;
+  const int global = maxUsable(s, white, dice, count);
+  if (global == 0) return;
+
+  for (int i = 0; i < count; i++) {
+    const uint8_t d = dice[i];
+    bool seen = false;
+    for (int j = 0; j < i; j++)
+      if (dice[j] == d) seen = true;
+    if (seen) continue;
+    std::vector<Step> steps;
+    genSteps(s, white, d, steps);
+    for (const auto& m : steps) {
+      State next = s;
+      applyStep(next, white, m);
+      uint8_t rest[4];
+      int n = 0;
+      for (int j = 0; j < count; j++)
+        if (j != i) rest[n++] = dice[j];
+      if (1 + maxUsable(next, white, rest, n) == global) out.push_back(m);
+    }
+  }
+
+  // Mixed roll where only one die can be played: the higher die is forced.
+  if (global == 1 && count == 2 && dice[0] != dice[1]) {
+    const uint8_t hi = dice[0] > dice[1] ? dice[0] : dice[1];
+    out.erase(std::remove_if(out.begin(), out.end(), [hi](const Step& m) { return m.die != hi; }), out.end());
   }
 }
 
@@ -187,6 +224,8 @@ void BackgammonActivity::rollDice() {
     diceLeft[diceCount++] = d1;
     diceLeft[diceCount++] = d2;
   }
+  for (int i = 0; i < diceCount; i++) diceRolled[i] = diceLeft[i];
+  diceRolledCount = diceCount;
   phase = MOVE;
   selected = -1;
   if (!anyStepAvailable()) {
@@ -208,11 +247,9 @@ void BackgammonActivity::consumeDie(const uint8_t die) {
 }
 
 bool BackgammonActivity::anyStepAvailable() const {
-  bool mask[7];
-  playableDice(mask);
-  for (int i = 1; i <= 6; i++)
-    if (mask[i]) return true;
-  return false;
+  std::vector<Step> steps;
+  legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
+  return !steps.empty();
 }
 
 void BackgammonActivity::endTurn() {
@@ -220,6 +257,7 @@ void BackgammonActivity::endTurn() {
   whiteTurn = !whiteTurn;
   phase = ROLL;
   diceCount = 0;
+  diceRolledCount = 0;
   if (vsAi && !whiteTurn && !gameOver) aiPending = true;
 }
 
@@ -240,7 +278,15 @@ void BackgammonActivity::handlePointChosen(const int point) {
       return;
     }
     if (point >= 0 && point < 24 && owns(st.pts[point], whiteTurn)) {
-      selected = point;
+      // Only allow selecting a checker that actually has a legal step.
+      std::vector<Step> steps;
+      legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
+      for (const auto& m : steps) {
+        if (m.from == point) {
+          selected = point;
+          break;
+        }
+      }
       requestUpdate();
     }
     return;
@@ -252,33 +298,28 @@ void BackgammonActivity::handlePointChosen(const int point) {
     return;
   }
 
-  // Find a playable step from selected to this destination.
-  bool mask[7];
-  playableDice(mask);
+  // Find a fully legal step from selected to this destination.
   std::vector<Step> steps;
-  for (int d = 1; d <= 6; d++) {
-    if (!mask[d]) continue;
-    genSteps(st, whiteTurn, d, steps);
-    for (const auto& m : steps) {
-      if (m.from != selected || m.to != point) continue;
-      applyStep(st, whiteTurn, m);
-      consumeDie(m.die);
-      selected = -1;
-      if (st.off[me] == 15) {
-        gameOver = true;
-        whiteWon = whiteTurn;
-        phase = OVER;
-        aiPending = false;
-      } else if (diceCount == 0) {
-        endTurn();
-      } else if (!anyStepAvailable()) {
-        statusOverride = tr(STR_NO_MOVE);
-        diceCount = 0;
-        endTurn();
-      }
-      requestUpdate();
-      return;
+  legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
+  for (const auto& m : steps) {
+    if (m.from != selected || m.to != point) continue;
+    applyStep(st, whiteTurn, m);
+    consumeDie(m.die);
+    selected = -1;
+    if (st.off[me] == 15) {
+      gameOver = true;
+      whiteWon = whiteTurn;
+      phase = OVER;
+      aiPending = false;
+    } else if (diceCount == 0) {
+      endTurn();
+    } else if (!anyStepAvailable()) {
+      statusOverride = tr(STR_NO_MOVE);
+      diceCount = 0;
+      endTurn();
     }
+    requestUpdate();
+    return;
   }
 
   // Reselect another own checker, else cancel.
@@ -291,17 +332,17 @@ void BackgammonActivity::handlePointChosen(const int point) {
 }
 
 // ---------------------------------------------------------------------------
-// AI: enumerate every legal move sequence for the roll, score the end states.
+// AI: enumerate every fully legal move sequence for the roll, score the ends.
 // ---------------------------------------------------------------------------
 
 int BackgammonActivity::evaluate(const State& s) {
   int score = (pipCount(s, false) - pipCount(s, true)) * 8;
   for (int i = 0; i < 24; i++) {
     const int v = s.pts[i];
-    if (v == 1) score -= 12;                                     // white blot
-    if (v >= 2) score += 15 + (i < 6 ? 8 : 0);                   // white made point
-    if (v == -1) score += 12;                                    // black blot
-    if (v <= -2) score -= 15 + (i > 17 ? 8 : 0);                 // black made point
+    if (v == 1) score -= 12;                       // white blot
+    if (v >= 2) score += 15 + (i < 6 ? 8 : 0);     // white made point
+    if (v == -1) score += 12;                      // black blot
+    if (v <= -2) score -= 15 + (i > 17 ? 8 : 0);   // black made point
   }
   score += 25 * (s.bar[1] - s.bar[0]);
   score += 30 * (s.off[0] - s.off[1]);
@@ -312,31 +353,29 @@ void BackgammonActivity::dfsSequences(const State& s, const bool white, const ui
                                       AiCtx& ctx) {
   if (ctx.nodes > 20000) return;
   ctx.nodes++;
-  bool any = false;
-  for (int i = 0; i < count; i++) {
-    const uint8_t d = dice[i];
-    bool seen = false;
-    for (int j = 0; j < i; j++)
-      if (dice[j] == d) seen = true;
-    if (seen) continue;
-    std::vector<Step> steps;
-    genSteps(s, white, d, steps);
-    for (const auto& m : steps) {
-      any = true;
-      State next = s;
-      applyStep(next, white, m);
-      uint8_t rest[4];
-      int n = 0;
-      for (int j = 0; j < count; j++)
-        if (j != i) rest[n++] = dice[j];
-      dfsSequences(next, white, rest, n, ctx);
-    }
-  }
-  if (!any || count == 0) {
-    // Terminal position for this sequence; dedupe.
+  std::vector<Step> steps;
+  legalFirstSteps(s, white, dice, count, steps);
+  if (steps.empty() || count == 0) {
+    // Terminal position for a maximal legal sequence; dedupe.
     for (const auto& r : ctx.results)
       if (std::memcmp(&r, &s, sizeof(State)) == 0) return;
     ctx.results.push_back(s);
+    return;
+  }
+  for (const auto& m : steps) {
+    State next = s;
+    applyStep(next, white, m);
+    uint8_t rest[4];
+    int n = 0;
+    bool removed = false;
+    for (int j = 0; j < count; j++) {
+      if (!removed && dice[j] == m.die) {
+        removed = true;
+        continue;
+      }
+      rest[n++] = dice[j];
+    }
+    dfsSequences(next, white, rest, n, ctx);
   }
 }
 
@@ -356,6 +395,9 @@ void BackgammonActivity::runAi() {
     diceLeft[diceCount++] = d1;
     diceLeft[diceCount++] = d2;
   }
+  for (int i = 0; i < diceCount; i++) diceRolled[i] = diceLeft[i];
+  diceRolledCount = diceCount;
+  phase = MOVE;
 
   AiCtx ctx;
   uint8_t dice[4];
@@ -380,6 +422,7 @@ void BackgammonActivity::runAi() {
     }
   }
   st = ctx.results[bestIdx];
+  diceCount = 0;
   if (st.off[1] == 15) {
     gameOver = true;
     whiteWon = false;
@@ -478,7 +521,7 @@ void BackgammonActivity::loop() {
         }
       }
       if (p >= 0) {
-        cursorPoint = p == SRC_BAR ? cursorPoint : p;
+        if (p != SRC_BAR) cursorPoint = p;
         handlePointChosen(p);
       }
       return;
@@ -498,7 +541,7 @@ void BackgammonActivity::loop() {
 // ---------------------------------------------------------------------------
 
 void BackgammonActivity::drawChecker(const int cx, const int cy, const int r, const bool white) const {
-  // 12-gon disk: white checkers get a black outline.
+  // 12-gon disk with a contrasting rim: black on white checkers, white on black.
   static const int DX[12] = {100, 87, 50, 0, -50, -87, -100, -87, -50, 0, 50, 87};
   static const int DY[12] = {0, 50, 87, 100, 87, 50, 0, -50, -87, -100, -87, -50};
   int xs[12], ys[12];
@@ -507,28 +550,19 @@ void BackgammonActivity::drawChecker(const int cx, const int cy, const int r, co
     ys[i] = cy + r * DY[i] / 100;
   }
   renderer.fillPolygon(xs, ys, 12, !white);
-  if (white) {
-    for (int i = 0; i < 12; i++) {
-      const int j = (i + 1) % 12;
-      renderer.drawLine(xs[i], ys[i], xs[j], ys[j], 1, true);
-    }
+  for (int i = 0; i < 12; i++) {
+    const int j = (i + 1) % 12;
+    renderer.drawLine(xs[i], ys[i], xs[j], ys[j], 2, white);
   }
 }
 
 void BackgammonActivity::drawDice() const {
-  if (phase == ROLL || diceCount == 0) return;
-  // Show the dice values still to play (up to 2 distinct pips boxes).
-  int shown[2] = {0, 0};
-  int n = 0;
-  for (int i = 0; i < diceCount && n < 2; i++) {
-    bool seen = false;
-    for (int j = 0; j < n; j++)
-      if (shown[j] == diceLeft[i]) seen = true;
-    if (!seen) shown[n++] = diceLeft[i];
-  }
-  const int box = 36;
-  const int gap = 12;
-  const int totalW = n * box + (n - 1) * gap;
+  if (diceRolledCount == 0) return;
+  // The full roll is shown; dice already played are greyed out, dice still to
+  // play are solid with crisp pips.
+  const int box = 40;
+  const int gap = 10;
+  const int totalW = diceRolledCount * box + (diceRolledCount - 1) * gap;
   const int x0 = boardX + (boardW - totalW) / 2;
   const int y0 = boardY + boardH / 2 - box / 2;
   static const int PIP[6][6] = {
@@ -539,19 +573,26 @@ void BackgammonActivity::drawDice() const {
       {0, 2, 4, 6, 8, -1},       // 5
       {0, 2, 3, 5, 6, 8},        // 6
   };
-  for (int d = 0; d < n; d++) {
+  // Count how many of each value remain to play.
+  int left[7] = {};
+  for (int i = 0; i < diceCount; i++) left[diceLeft[i]]++;
+
+  for (int d = 0; d < diceRolledCount; d++) {
+    const int v = diceRolled[d];
     const int x = x0 + d * (box + gap);
-    renderer.fillRoundedRect(x, y0, box, box, 6, White);
-    renderer.drawRoundedRect(x, y0, box, box, 2, 6, Black);
-    const int v = shown[d];
-    // Pip positions in a 3x3 grid, indices 0..8.
-    int pips[6];
-    int pc = 0;
-    for (int i = 0; i < 6 && PIP[v - 1][i] >= 0; i++) pips[pc++] = PIP[v - 1][i];
-    for (int i = 0; i < pc; i++) {
-      const int gx = pips[i] % 3;
-      const int gy = pips[i] / 3;
-      gameart::disk(renderer, gx * 50, gy * 50, 22, x + box / 10, y0 + box / 10, box * 8 / 10, true);
+    const bool spent = left[v] > 0 ? (left[v]--, false) : true;
+    if (spent) {
+      // Used die: light dithered box, outline only.
+      renderer.fillRoundedRect(x, y0, box, box, 6, LightGray);
+      renderer.drawRoundedRect(x, y0, box, box, 1, 6, DarkGray);
+    } else {
+      renderer.fillRoundedRect(x, y0, box, box, 6, White);
+      renderer.drawRoundedRect(x, y0, box, box, 2, 6, Black);
+      for (int i = 0; i < 6 && PIP[v - 1][i] >= 0; i++) {
+        const int gx = PIP[v - 1][i] % 3;
+        const int gy = PIP[v - 1][i] / 3;
+        gameart::disk(renderer, gx * 50, gy * 50, 22, x + box / 10, y0 + box / 10, box * 8 / 10, true);
+      }
     }
   }
 }
@@ -618,21 +659,17 @@ void BackgammonActivity::render(RenderLock&&) {
       renderer.drawLine(xs[1], ys[1], xs[2], ys[2], 2, true);
     }
 
-    // Checkers on the point.
+    // Checkers on the point: stacked inside the triangle height; when there
+    // are too many, they overlap (straddled) instead of spilling out.
     const int v = st.pts[idx];
     const int count = v > 0 ? v : -v;
     const bool white = v > 0;
     const int cx = x + pointW / 2;
-    const int shown = count > 5 ? 4 : count;
-    for (int k = 0; k < shown; k++) {
-      const int cy = topRow ? boardY + r + 2 + k * (2 * r + 1) : boardY + boardH - r - 2 - k * (2 * r + 1);
+    const int avail = triH - 2 * r - 6;
+    const int step = count > 1 ? std::min(2 * r + 1, avail / (count - 1)) : 0;
+    for (int k = count - 1; k >= 0; k--) {
+      const int cy = topRow ? boardY + r + 2 + k * step : boardY + boardH - r - 2 - k * step;
       drawChecker(cx, cy, r, white);
-    }
-    if (count > 5) {
-      char buf[8];
-      snprintf(buf, sizeof(buf), "%d", count);
-      const int cy = topRow ? boardY + 4 * (2 * r + 1) + r : boardY + boardH - 4 * (2 * r + 1) - r;
-      renderer.drawCenteredText(UI_10_FONT_ID, cy - renderer.getTextHeight(UI_10_FONT_ID) / 2, buf);
     }
 
     // Selection / cursor outlines on the column.
@@ -644,12 +681,15 @@ void BackgammonActivity::render(RenderLock&&) {
     }
   }
 
-  // Bar checkers.
-  for (int k = 0; k < st.bar[0]; k++) {
-    drawChecker(boardX + 6 * pointW + barW / 2, boardY + boardH - r - 2 - k * (2 * r + 1), r, true);
+  // Bar checkers (stacked from each end, compressed if many).
+  const int barAvail = triH - 2 * r - 6;
+  const int wStep = st.bar[0] > 1 ? std::min(2 * r + 1, barAvail / (st.bar[0] - 1)) : 0;
+  for (int k = st.bar[0] - 1; k >= 0; k--) {
+    drawChecker(boardX + 6 * pointW + barW / 2, boardY + boardH - r - 2 - k * wStep, r, true);
   }
-  for (int k = 0; k < st.bar[1]; k++) {
-    drawChecker(boardX + 6 * pointW + barW / 2, boardY + r + 2 + k * (2 * r + 1), r, false);
+  const int bStep = st.bar[1] > 1 ? std::min(2 * r + 1, barAvail / (st.bar[1] - 1)) : 0;
+  for (int k = st.bar[1] - 1; k >= 0; k--) {
+    drawChecker(boardX + 6 * pointW + barW / 2, boardY + r + 2 + k * bStep, r, false);
   }
   if (selected == SRC_BAR) {
     renderer.drawRect(boardX + 6 * pointW + 2, boardY + boardH / 2 - triH / 2, barW - 4, triH, 3, true);
@@ -664,28 +704,23 @@ void BackgammonActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, diceZoneY + 4, buf);
   }
 
-  // Legal destination markers for the selected source.
+  // Legal destination markers for the selected source (rule-filtered steps).
   if (selected >= 0 && phase == MOVE) {
-    bool mask[7];
-    playableDice(mask);
     std::vector<Step> steps;
-    for (int d = 1; d <= 6; d++) {
-      if (!mask[d]) continue;
-      genSteps(st, whiteTurn, d, steps);
-      for (const auto& m : steps) {
-        if (m.from != selected) continue;
-        if (m.to == DST_OFF) {
-          // Dot on the bar column, own half.
-          const int cy = whiteTurn ? boardY + boardH / 2 + 20 : boardY + boardH / 2 - 20;
-          gameart::disk(renderer, 0, 0, 10, boardX + 6 * pointW + barW / 2 - 10, cy - 10, 20, true);
-        } else {
-          const bool topRow = m.to >= 12;
-          const int col = topRow ? m.to - 12 : 11 - m.to;
-          const int x = boardX + col * pointW + (col >= 6 ? barW : 0);
-          const int cx = x + pointW / 2;
-          const int cy = topRow ? boardY + triH - 10 : boardY + boardH - triH + 10;
-          gameart::disk(renderer, 0, 0, 10, cx - 10, cy - 10, 20, true);
-        }
+    legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
+    for (const auto& m : steps) {
+      if (m.from != selected) continue;
+      if (m.to == DST_OFF) {
+        // Dot on the bar column, own half.
+        const int cy = whiteTurn ? boardY + boardH / 2 + 20 : boardY + boardH / 2 - 20;
+        gameart::disk(renderer, 0, 0, 10, boardX + 6 * pointW + barW / 2 - 10, cy - 10, 20, true);
+      } else {
+        const bool topRow = m.to >= 12;
+        const int col = topRow ? m.to - 12 : 11 - m.to;
+        const int x = boardX + col * pointW + (col >= 6 ? barW : 0);
+        const int cx = x + pointW / 2;
+        const int cy = topRow ? boardY + triH - 10 : boardY + boardH - triH + 10;
+        gameart::disk(renderer, 0, 0, 10, cx - 10, cy - 10, 20, true);
       }
     }
   }
