@@ -1,13 +1,13 @@
 #include "CheckersActivity.h"
 
+#include <GameSession.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <I18n.h>
+#include <esp_random.h>
 
 #include <algorithm>
 #include <cstring>
-
-#include <esp_random.h>
 
 #include "PieceArt.h"
 #include "components/UITheme.h"
@@ -16,6 +16,11 @@
 namespace {
 constexpr int DR[4] = {-1, -1, 1, 1};
 constexpr int DC[4] = {-1, 1, -1, 1};
+constexpr size_t SESSION_SIZE = 150;
+constexpr size_t SESSION_BOARD = 9;
+constexpr size_t SESSION_PATH = SESSION_BOARD + 100;
+constexpr size_t SESSION_CAPTURES = SESSION_PATH + 21;
+static_assert(SESSION_SIZE <= GameSession::MAX_PAYLOAD);
 
 inline bool onBoard(int row, int col) { return row >= 0 && row < 10 && col >= 0 && col < 10; }
 }  // namespace
@@ -23,7 +28,126 @@ inline bool onBoard(int row, int col) { return row >= 0 && row < 10 && col >= 0 
 void CheckersActivity::onEnter() {
   Activity::onEnter();
   reset();
+  if (!loadSession()) reset();
   requestUpdate();
+}
+
+void CheckersActivity::onExit() {
+  saveSession();
+  Activity::onExit();
+}
+
+void CheckersActivity::prepareForSleep() { saveSession(); }
+
+bool CheckersActivity::saveSession() {
+  if (!sessionDirty) return true;
+  GameSession::Buffer payload{};
+  payload[0] = 1;
+  payload[1] = (whiteTurn ? 1 : 0) | (gameOver ? 2 : 0) | (aiPlaying ? 4 : 0);
+  payload[2] = static_cast<uint8_t>(cursorRow * 10 + cursorCol);
+  payload[3] = selected < 0 ? 255 : static_cast<uint8_t>(selected);
+  payload[4] = capturePathCount;
+  payload[5] = capturedCount;
+  payload[6] = aiPathCount;
+  payload[7] = aiCapturedCount;
+  payload[8] = aiStepIndex;
+  memcpy(payload.data() + SESSION_BOARD, turnBoard, sizeof(turnBoard));
+  memcpy(payload.data() + SESSION_PATH, aiPlaying ? aiPath : capturePath, MAX_PATH);
+  memcpy(payload.data() + SESSION_CAPTURES, aiPlaying ? aiCaptured : capturedSquares, MAX_CAPTURES);
+  if (!GameSession::save(GameSession::Game::Checkers, vsAi, payload.data(), SESSION_SIZE)) return false;
+  sessionDirty = false;
+  return true;
+}
+
+bool CheckersActivity::loadSession() {
+  GameSession::Buffer payload{};
+  if (!GameSession::load(GameSession::Game::Checkers, vsAi, payload.data(), SESSION_SIZE)) return false;
+  if (payload[0] != 1 || payload[1] > 7 || payload[2] >= 100 || (payload[3] != 255 && payload[3] >= 100) ||
+      payload[4] > MAX_PATH || payload[5] > MAX_CAPTURES || payload[6] > MAX_PATH || payload[7] > MAX_CAPTURES) {
+    return false;
+  }
+  whiteTurn = (payload[1] & 1) != 0;
+  gameOver = (payload[1] & 2) != 0;
+  aiPlaying = (payload[1] & 4) != 0;
+  capturePathCount = payload[4];
+  capturedCount = payload[5];
+  aiPathCount = payload[6];
+  aiCapturedCount = payload[7];
+  aiStepIndex = payload[8];
+  if (aiPlaying) {
+    if (!vsAi || whiteTurn || gameOver || capturePathCount != 0 || capturedCount != 0 || aiPathCount < 2 ||
+        aiStepIndex > aiPathCount - 1 || (aiCapturedCount != 0 && aiCapturedCount + 1 != aiPathCount)) {
+      return false;
+    }
+  } else if (aiPathCount != 0 || aiCapturedCount != 0 || aiStepIndex != 0 ||
+             (capturePathCount != 0 && (capturePathCount < 2 || capturedCount + 1 != capturePathCount)) ||
+             (capturePathCount == 0 && capturedCount != 0) ||
+             (capturePathCount != 0 && (gameOver || (vsAi && !whiteTurn)))) {
+    return false;
+  }
+  memcpy(turnBoard, payload.data() + SESSION_BOARD, sizeof(turnBoard));
+  int whiteCount = 0, blackCount = 0;
+  for (int sq = 0; sq < 100; ++sq) {
+    const int p = turnBoard[sq];
+    if (p < -2 || p > 2 || (p != 0 && !playable(sq / 10, sq % 10))) return false;
+    if (p > 0) ++whiteCount;
+    if (p < 0) ++blackCount;
+  }
+  if (whiteCount > 20 || blackCount > 20) return false;
+  genMovesFor(turnBoard, whiteTurn, legalMoves);
+  memcpy(b, turnBoard, sizeof(b));
+  if (aiPlaying || capturePathCount != 0) {
+    int8_t* path = aiPlaying ? aiPath : capturePath;
+    int8_t* captured = aiPlaying ? aiCaptured : capturedSquares;
+    const uint8_t pathCount = aiPlaying ? aiPathCount : capturePathCount;
+    const uint8_t capCount = aiPlaying ? aiCapturedCount : capturedCount;
+    memcpy(path, payload.data() + SESSION_PATH, MAX_PATH);
+    memcpy(captured, payload.data() + SESSION_CAPTURES, MAX_CAPTURES);
+    bool valid = false;
+    for (const auto& move : legalMoves) {
+      if ((aiPlaying ? move.path.size() == pathCount : move.path.size() > pathCount) &&
+          (aiPlaying ? move.captured.size() == capCount : move.captured.size() > capCount) &&
+          std::equal(path, path + pathCount, move.path.begin()) &&
+          std::equal(captured, captured + capCount, move.captured.begin())) {
+        valid = true;
+        break;
+      }
+    }
+    if (!valid) return false;
+    const uint8_t completed = aiPlaying ? aiStepIndex : capturedCount;
+    const int piece = b[path[0]];
+    for (uint8_t i = 0; i < completed; ++i) {
+      b[path[i]] = 0;
+      if (capCount != 0) b[captured[i]] = 0;
+      b[path[i + 1]] = piece;
+    }
+    if (aiPlaying && completed + 1 == pathCount && !isKing(piece)) {
+      const int to = path[completed];
+      if (to / 10 == 0 || to / 10 == 9) b[to] = piece > 0 ? 2 : -2;
+    }
+  }
+  cursorRow = payload[2] / 10;
+  cursorCol = payload[2] % 10;
+  lockedPiece = capturePathCount == 0 ? -1 : capturePath[capturePathCount - 1];
+  selected = lockedPiece >= 0 ? lockedPiece : (payload[3] == 255 ? -1 : payload[3]);
+  statusOverride = nullptr;
+  if (aiPlaying) {
+    selected = aiPath[aiStepIndex];
+    targets.clear();
+    aiPending = false;
+  } else {
+    computeLegalMoves();
+    if (selected >= 0 && (b[selected] == 0 || (b[selected] > 0) != whiteTurn)) selected = -1;
+    rebuildTargets();
+    const bool storedOver = gameOver;
+    gameOver = false;
+    updateStatusAfterMove();
+    if (storedOver != gameOver) return false;
+    aiPending = vsAi && !whiteTurn && !gameOver;
+  }
+  aiNextStepAt = 0;
+  sessionDirty = false;
+  return true;
 }
 
 void CheckersActivity::reset() {
@@ -42,6 +166,16 @@ void CheckersActivity::reset() {
   gameOver = false;
   statusOverride = nullptr;
   aiPending = false;
+  aiPlaying = false;
+  aiPathCount = 0;
+  aiCapturedCount = 0;
+  aiStepIndex = 0;
+  aiNextStepAt = 0;
+  capturePathCount = 0;
+  capturedCount = 0;
+  confirmRestart = false;
+  sessionDirty = true;
+  memcpy(turnBoard, b, sizeof(b));
   computeLegalMoves();
   targets.clear();
 }
@@ -116,14 +250,21 @@ void CheckersActivity::capturesFrom(const int8_t board[100], const int square, s
 
 void CheckersActivity::genMovesFor(const int8_t board[100], const bool white, std::vector<Move>& out) const {
   out.clear();
+  out.reserve(32);
 
   // Collect captures first (mandatory, and only the longest count).
   std::vector<Move> captures;
+  captures.reserve(32);
+  std::vector<int8_t> path;
+  std::vector<int8_t> captured;
+  path.reserve(MAX_PATH);
+  captured.reserve(MAX_CAPTURES);
   for (int sq = 0; sq < 100; sq++) {
     const int piece = board[sq];
     if (piece == 0 || (piece > 0) != white) continue;
-    std::vector<int8_t> path{static_cast<int8_t>(sq)};
-    std::vector<int8_t> captured;
+    path.clear();
+    captured.clear();
+    path.push_back(static_cast<int8_t>(sq));
     capturesFrom(board, sq, path, captured, captures);
   }
 
@@ -169,49 +310,92 @@ void CheckersActivity::genMovesFor(const int8_t board[100], const bool white, st
 }
 
 void CheckersActivity::computeLegalMoves() {
-  if (lockedPiece >= 0) {
-    // A forced continuation must be a capture by the locked piece.
-    legalMoves.clear();
-    std::vector<int8_t> path{static_cast<int8_t>(lockedPiece)};
-    std::vector<int8_t> captured;
-    capturesFrom(b, lockedPiece, path, captured, legalMoves);
-    return;
+  genMovesFor(capturePathCount == 0 ? b : turnBoard, whiteTurn, legalMoves);
+  if (capturePathCount != 0) {
+    legalMoves.erase(
+        std::remove_if(legalMoves.begin(), legalMoves.end(),
+                       [this](const Move& move) {
+                         return move.path.size() <= capturePathCount || move.captured.size() <= capturedCount ||
+                                !std::equal(capturePath, capturePath + capturePathCount, move.path.begin()) ||
+                                !std::equal(capturedSquares, capturedSquares + capturedCount, move.captured.begin());
+                       }),
+        legalMoves.end());
   }
-  genMovesFor(b, whiteTurn, legalMoves);
 }
 
 void CheckersActivity::rebuildTargets() {
   targets.clear();
+  targets.reserve(legalMoves.size());
   if (selected < 0) return;
+  const size_t current = capturePathCount == 0 ? 0 : capturePathCount - 1;
   for (const auto& m : legalMoves)
-    if (!m.path.empty() && m.path.front() == selected) targets.push_back(&m);
+    if (m.path.size() > current + 1 && m.path[current] == selected) targets.push_back(&m);
 }
 
 // ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
 
-void CheckersActivity::playMove(const Move& m) {
-  const int from = m.path.front();
-  const int to = m.path.back();
-  const int piece = b[from];
-
-  b[from] = 0;
-  b[to] = piece;
-  for (const int8_t cap : m.captured) b[cap] = 0;
-
-  // Promotion on the last row (even mid-sequence the run stops, per the rules:
-  // a man reaching the last rank by capture is crowned and stops).
-  if (!isKing(piece) && (to / 10 == 0 || to / 10 == 9)) {
-    b[to] = piece > 0 ? 2 : -2;
-  }
-
+void CheckersActivity::finishTurn() {
   whiteTurn = !whiteTurn;
   lockedPiece = -1;
   selected = -1;
+  capturePathCount = 0;
+  capturedCount = 0;
+  aiPlaying = false;
+  aiPending = false;
+  aiPathCount = 0;
+  aiCapturedCount = 0;
+  aiStepIndex = 0;
+  aiNextStepAt = 0;
   targets.clear();
+  memcpy(turnBoard, b, sizeof(b));
   computeLegalMoves();
   updateStatusAfterMove();
+  sessionDirty = true;
+}
+
+void CheckersActivity::playMove(const Move& m) {
+  const size_t current = capturePathCount == 0 ? 0 : capturePathCount - 1;
+  const int from = m.path[current];
+  const int to = m.path.back();
+  const int piece = b[from];
+  b[from] = 0;
+  for (size_t i = capturedCount; i < m.captured.size(); ++i) b[m.captured[i]] = 0;
+  b[to] = piece;
+  if (!isKing(piece) && (to / 10 == 0 || to / 10 == 9)) b[to] = piece > 0 ? 2 : -2;
+  finishTurn();
+}
+
+void CheckersActivity::playStep(const Move& m) {
+  if (m.captured.empty()) {
+    playMove(m);
+    return;
+  }
+  if (capturePathCount == 0) {
+    capturePath[0] = m.path.front();
+    capturePathCount = 1;
+  }
+  const int from = m.path[capturePathCount - 1];
+  const int to = m.path[capturePathCount];
+  const int piece = b[from];
+  b[from] = 0;
+  b[m.captured[capturedCount]] = 0;
+  b[to] = piece;
+  capturePath[capturePathCount++] = static_cast<int8_t>(to);
+  capturedSquares[capturedCount] = m.captured[capturedCount];
+  ++capturedCount;
+  if (capturePathCount == m.path.size()) {
+    if (!isKing(piece) && (to / 10 == 0 || to / 10 == 9)) b[to] = piece > 0 ? 2 : -2;
+    finishTurn();
+    return;
+  }
+  lockedPiece = selected = to;
+  cursorRow = to / 10;
+  cursorCol = to % 10;
+  computeLegalMoves();
+  rebuildTargets();
+  sessionDirty = true;
 }
 
 void CheckersActivity::updateStatusAfterMove() {
@@ -236,52 +420,50 @@ void CheckersActivity::updateStatusAfterMove() {
   if (vsAi && !whiteTurn) aiPending = true;
 }
 
-void CheckersActivity::handleSquareChosen(const int square) {
-  if (gameOver || (vsAi && !whiteTurn)) return;
+void CheckersActivity::handleSquareChosen(const int square, const bool complete) {
+  if (square < 0 || square >= 100 || gameOver || (vsAi && !whiteTurn)) return;
   const int piece = b[square];
-
-  if (selected < 0) {
-    if (piece != 0 && (piece > 0) == whiteTurn) {
-      // Only pieces that actually have a legal move may be selected.
-      for (const auto& m : legalMoves) {
-        if (!m.path.empty() && m.path.front() == square) {
-          selected = square;
-          rebuildTargets();
+  const size_t next = capturePathCount == 0 ? 1 : capturePathCount;
+  if (selected >= 0) {
+    if (complete) {
+      for (const auto* move : targets) {
+        if (move->path.back() == square || square == selected) {
+          playMove(*move);
+          requestUpdate();
+          return;
+        }
+      }
+    } else {
+      for (const auto* move : targets) {
+        if (move->path[next] == square) {
+          playStep(*move);
+          requestUpdate();
+          return;
+        }
+      }
+      for (const auto* move : targets) {
+        if (move->path.back() == square) {
+          playMove(*move);
           requestUpdate();
           return;
         }
       }
     }
-    return;
   }
-
+  if (lockedPiece >= 0) return;
   if (square == selected) {
-    if (lockedPiece < 0) {
-      selected = -1;
-      targets.clear();
-      requestUpdate();
-    }
-    return;
+    selected = -1;
+    targets.clear();
+  } else if (piece != 0 && (piece > 0) == whiteTurn) {
+    selected = square;
+    rebuildTargets();
+    if (targets.empty()) selected = -1;
+  } else {
+    selected = -1;
+    targets.clear();
   }
-
-  for (const auto* m : targets) {
-    if (m->path.size() >= 2 && m->path[1] == square) {
-      playMove(*m);
-      requestUpdate();
-      return;
-    }
-  }
-
-  if (lockedPiece < 0) {
-    if (piece != 0 && (piece > 0) == whiteTurn) {
-      selected = square;
-      rebuildTargets();
-    } else {
-      selected = -1;
-      targets.clear();
-    }
-    requestUpdate();
-  }
+  sessionDirty = true;
+  requestUpdate();
 }
 
 void CheckersActivity::applyOnBoard(int8_t board[100], const Move& m) {
@@ -317,8 +499,8 @@ int CheckersActivity::evalBoard(const int8_t board[100]) const {
   return score;
 }
 
-int CheckersActivity::searchBoard(const int8_t board[100], const bool white, const int depth, int alpha,
-                                  const int beta, const int ply) {
+int CheckersActivity::searchBoard(const int8_t board[100], const bool white, const int depth, int alpha, const int beta,
+                                  const int ply) {
   nodes++;
   if (depth == 0 || nodes > NODE_LIMIT) {
     const int eval = evalBoard(board);
@@ -350,32 +532,81 @@ int CheckersActivity::searchBoard(const int8_t board[100], const bool white, con
 }
 
 void CheckersActivity::runAi() {
-  if (gameOver || whiteTurn || legalMoves.empty()) {
+  {
+    RenderLock lock(*this);
+    if (gameOver || whiteTurn || legalMoves.empty()) {
+      aiPending = false;
+      return;
+    }
+    nodes = 0;
+    int bestScore = -MATE - 1;
+    const Move* bestMove = nullptr;
+    uint32_t ties = 0;
+    for (const auto& m : legalMoves) {
+      int8_t next[100];
+      memcpy(next, b, sizeof(next));
+      applyOnBoard(next, m);
+      const int score = -searchBoard(next, true, AI_DEPTH - 1, -MATE, MATE, 1);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = &m;
+        ties = 1;
+      } else if (score == bestScore && esp_random() % ++ties == 0) {
+        bestMove = &m;
+      }
+    }
     aiPending = false;
-    return;
+    if (!bestMove || bestMove->path.size() > MAX_PATH || bestMove->captured.size() > MAX_CAPTURES) {
+      LOG_ERR("CHECKERS", "Invalid AI move sequence");
+      return;
+    }
+    aiPathCount = static_cast<uint8_t>(bestMove->path.size());
+    aiCapturedCount = static_cast<uint8_t>(bestMove->captured.size());
+    std::copy(bestMove->path.begin(), bestMove->path.end(), aiPath);
+    std::copy(bestMove->captured.begin(), bestMove->captured.end(), aiCaptured);
+    aiStepIndex = 0;
+    aiPlaying = true;
+    selected = aiPath[0];
+    cursorRow = selected / 10;
+    cursorCol = selected % 10;
+    targets.clear();
+    sessionDirty = true;
   }
-  nodes = 0;
-  int bestScore = -MATE - 1;
-  std::vector<const Move*> bestMoves;
-  for (const auto& m : legalMoves) {
-    int8_t next[100];
-    memcpy(next, b, sizeof(next));
-    applyOnBoard(next, m);
-    const int score = -searchBoard(next, true, AI_DEPTH - 1, -MATE, MATE, 1);
-    if (score > bestScore) {
-      bestScore = score;
-      bestMoves.clear();
-      bestMoves.push_back(&m);
-    } else if (score == bestScore) {
-      bestMoves.push_back(&m);
+  requestUpdateAndWait();
+  {
+    RenderLock lock(*this);
+    aiNextStepAt = millis() + AI_STEP_DELAY_MS;
+  }
+}
+
+void CheckersActivity::advanceAi() {
+  {
+    RenderLock lock(*this);
+    if (!aiPlaying) return;
+    if (aiStepIndex + 1 == aiPathCount) {
+      finishTurn();
+    } else {
+      const int from = aiPath[aiStepIndex];
+      const int to = aiPath[aiStepIndex + 1];
+      const int piece = b[from];
+      b[from] = 0;
+      if (aiCapturedCount != 0) b[aiCaptured[aiStepIndex]] = 0;
+      b[to] = piece;
+      ++aiStepIndex;
+      selected = to;
+      cursorRow = to / 10;
+      cursorCol = to % 10;
+      sessionDirty = true;
+      if (aiStepIndex + 1 == aiPathCount && !isKing(piece) && (to / 10 == 0 || to / 10 == 9)) {
+        b[to] = piece > 0 ? 2 : -2;
+      }
     }
   }
-  aiPending = false;
-  if (!bestMoves.empty()) {
-    // Random pick among equally best moves for variety.
-    playMove(*bestMoves[esp_random() % bestMoves.size()]);
+  requestUpdateAndWait();
+  {
+    RenderLock lock(*this);
+    if (aiPlaying) aiNextStepAt = millis() + AI_STEP_DELAY_MS;
   }
-  requestUpdate();
 }
 
 // ---------------------------------------------------------------------------
@@ -392,62 +623,115 @@ int CheckersActivity::squareFromTouch(const int x, const int y) const {
 }
 
 void CheckersActivity::loop() {
-  if (aiPending) {
-    runAi();
+  RenderLock lock(*this);
+  const bool ignoreBackRelease = backLongHandled;
+  const bool ignoreConfirmRelease = confirmLongHandled;
+  const bool backReleased = mappedInput.wasReleased(MappedInputManager::Button::Back) && !ignoreBackRelease;
+  const bool confirmReleased = mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !ignoreConfirmRelease;
+  if (!mappedInput.isPressed(MappedInputManager::Button::Back)) backLongHandled = false;
+  if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) confirmLongHandled = false;
+  if (!confirmRestart && mappedInput.wasLongPressed(MappedInputManager::Button::Back, 700)) {
+    backLongHandled = true;
+    confirmRestart = true;
+    requestUpdate();
     return;
   }
-
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
-    if (cursorCol > 0) cursorCol--;
+  int tx = 0, ty = 0;
+  const bool tapped = mappedInput.wasScreenTapped(tx, ty);
+  if (confirmRestart) {
+    const bool cancel = backReleased;
+    const bool confirm = confirmReleased;
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int y = renderer.getScreenHeight() / 2 + renderer.getTextHeight(UI_10_FONT_ID) * 2;
+    const int choiceHeight = std::max(metrics.buttonHintsHeight, renderer.getTextHeight(UI_10_FONT_ID) + 16);
+    const bool tappedChoice = tapped && ty >= y && ty < y + choiceHeight;
+    if (confirm || (tappedChoice && tx >= renderer.getScreenWidth() / 2)) {
+      reset();
+      saveSession();
+      requestUpdate();
+    } else if (cancel || (tappedChoice && tx < renderer.getScreenWidth() / 2)) {
+      confirmRestart = false;
+      aiNextStepAt = 0;
+      requestUpdate();
+    }
+    return;
+  }
+  if (tapped && tx >= restartX && tx < restartX + restartW && ty >= restartY && ty < restartY + restartH) {
+    confirmRestart = true;
     requestUpdate();
-  });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
-    if (cursorCol < 9) cursorCol++;
-    requestUpdate();
-  });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenUp}, [this] {
-    if (cursorRow > 0) cursorRow--;
-    requestUpdate();
-  });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenDown}, [this] {
-    if (cursorRow < 9) cursorRow++;
-    requestUpdate();
-  });
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    if (selected >= 0 && lockedPiece < 0) {
+    return;
+  }
+  if (backReleased) {
+    if (selected >= 0 && lockedPiece < 0 && !aiPlaying) {
       selected = -1;
       targets.clear();
+      sessionDirty = true;
       requestUpdate();
-    } else if (selected < 0) {
+    } else {
+      saveSession();
+      lock.unlock();
       finish();
     }
     return;
   }
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
-    } else {
-      handleSquareChosen(cursorRow * 10 + cursorCol);
+  if (aiPending) {
+    lock.unlock();
+    runAi();
+    return;
+  }
+  if (aiPlaying) {
+    if (aiNextStepAt == 0) {
+      lock.unlock();
+      requestUpdateAndWait();
+      RenderLock timingLock(*this);
+      aiNextStepAt = millis() + AI_STEP_DELAY_MS;
+    } else if (static_cast<int32_t>(millis() - aiNextStepAt) >= 0) {
+      lock.unlock();
+      advanceAi();
     }
     return;
   }
-
-  int tx = 0, ty = 0;
-  if (mappedInput.wasScreenTapped(tx, ty)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
-      return;
-    }
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
+    if (cursorCol > 0) cursorCol--;
+    sessionDirty = true;
+    requestUpdate();
+  });
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
+    if (cursorCol < 9) cursorCol++;
+    sessionDirty = true;
+    requestUpdate();
+  });
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenUp}, [this] {
+    if (cursorRow > 0) cursorRow--;
+    sessionDirty = true;
+    requestUpdate();
+  });
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenDown}, [this] {
+    if (cursorRow < 9) cursorRow++;
+    sessionDirty = true;
+    requestUpdate();
+  });
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 700)) {
+    confirmLongHandled = true;
+    handleSquareChosen(cursorRow * 10 + cursorCol, true);
+    return;
+  }
+  if (confirmReleased) {
+    handleSquareChosen(cursorRow * 10 + cursorCol);
+    return;
+  }
+  if (tapped) {
     const int sq = squareFromTouch(tx, ty);
     if (sq >= 0) {
       cursorRow = sq / 10;
       cursorCol = sq % 10;
+      sessionDirty = true;
       handleSquareChosen(sq);
     }
+  }
+  if (mappedInput.wasScreenLongPress(tx, ty)) {
+    const int sq = squareFromTouch(tx, ty);
+    if (sq >= 0) handleSquareChosen(sq, true);
   }
 }
 
@@ -482,12 +766,38 @@ void CheckersActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight - metrics.topPadding},
                  tr(STR_CHECKERS), nullptr, true);
 
-  const int statusY = metrics.headerHeight + 4;
+  restartW = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_NEW_GAME)) + 16;
+  restartH = renderer.getTextHeight(UI_10_FONT_ID) + 10;
+  restartX = pageWidth - restartW - 8;
+  restartY = metrics.headerHeight + 4;
+  renderer.drawRoundedRect(restartX, restartY, restartW, restartH, 1, 4, true);
+  renderer.drawText(UI_10_FONT_ID, restartX + 8, restartY + 5, tr(STR_NEW_GAME));
+
+  if (confirmRestart) {
+    const int y = pageHeight / 2;
+    const int choiceY = y + renderer.getTextHeight(UI_10_FONT_ID) * 2;
+    const int choiceHeight = std::max(metrics.buttonHintsHeight, renderer.getTextHeight(UI_10_FONT_ID) + 16);
+    renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_NEW_GAME));
+    renderer.drawRoundedRect(8, choiceY, pageWidth / 2 - 16, choiceHeight, 1, 4, true);
+    renderer.drawRoundedRect(pageWidth / 2 + 8, choiceY, pageWidth / 2 - 16, choiceHeight, 1, 4, true);
+    renderer.drawText(UI_10_FONT_ID, 16, choiceY + 6, tr(STR_CANCEL));
+    renderer.drawText(UI_10_FONT_ID, pageWidth / 2 + 16, choiceY + 6, tr(STR_CONFIRM));
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_CONFIRM), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+
+  const int statusY = restartY + restartH + 4;
   const char* status = statusOverride;
   if (!status) status = whiteTurn ? tr(STR_WHITE_PLAYS) : tr(STR_BLACK_PLAYS);
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, status);
 
-  const int top = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 12;
+  const int hintY = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 4;
+  if (selected >= 0 && !aiPlaying && !targets.empty() && !targets.front()->captured.empty()) {
+    renderer.drawCenteredText(UI_10_FONT_ID, hintY, tr(STR_GAME_COMPLETE_CAPTURE_HINT));
+  }
+  const int top = hintY + renderer.getTextHeight(UI_10_FONT_ID) + 8;
   const int bottomReserve = metrics.buttonHintsHeight + 8;
   const int availH = pageHeight - top - bottomReserve;
   const int availW = pageWidth - 24;
@@ -510,12 +820,18 @@ void CheckersActivity::render(RenderLock&&) {
   }
   renderer.drawRect(boardX, boardY, squareSize * 10, squareSize * 10, 2, true);
 
+  const size_t next = capturePathCount == 0 ? 1 : capturePathCount;
   for (const auto* m : targets) {
-    const int to = m->path[1];
+    const int to = m->path[next];
     const int x = boardX + (to % 10) * squareSize;
     const int y = boardY + (to / 10) * squareSize;
     const int d = squareSize / 4;
     renderer.fillRoundedRect(x + (squareSize - d) / 2, y + (squareSize - d) / 2, d, d, d / 2, DarkGray);
+    const int end = m->path.back();
+    if (end != to) {
+      renderer.drawRect(boardX + (end % 10) * squareSize + squareSize / 4,
+                        boardY + (end / 10) * squareSize + squareSize / 4, squareSize / 2, squareSize / 2, 2, true);
+    }
   }
 
   if (selected >= 0) {
@@ -526,7 +842,7 @@ void CheckersActivity::render(RenderLock&&) {
   renderer.drawRect(boardX + cursorCol * squareSize + 2, boardY + cursorRow * squareSize + 2, squareSize - 4,
                     squareSize - 4, 1, true);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT), "", "");
+  const auto labels = mappedInput.mapLabels(tr(STR_GAME_NEW_GAME_HINT), tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   const bool halfRefresh = (renderCount % 12) == 0;

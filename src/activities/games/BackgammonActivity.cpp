@@ -1,25 +1,29 @@
 #include "BackgammonActivity.h"
 
+#include <GameSession.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <I18n.h>
+#include <esp_random.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
-
-#include <esp_random.h>
 
 #include "PieceArt.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
+constexpr size_t SESSION_SIZE = 65;
+constexpr uint32_t AI_STEP_PAUSE_MS = 800;
+constexpr unsigned long RESTART_HOLD_MS = 700;
 // Standard starting position, index = point - 1.
 constexpr int8_t INITIAL_POINTS[24] = {
-    -2, 0, 0, 0,  0, 5,   // 1..6
-    0,  3, 0, 0,  0, -5,  // 7..12
-    5,  0, 0, 0,  -3, 0,  // 13..18
-    -5, 0, 0, 0,  0, 2,   // 19..24
+    -2, 0, 0, 0, 0,  5,   // 1..6
+    0,  3, 0, 0, 0,  -5,  // 7..12
+    5,  0, 0, 0, -3, 0,   // 13..18
+    -5, 0, 0, 0, 0,  2,   // 19..24
 };
 
 inline bool owns(const int8_t v, const bool white) { return white ? v > 0 : v < 0; }
@@ -27,8 +31,164 @@ inline bool owns(const int8_t v, const bool white) { return white ? v > 0 : v < 
 
 void BackgammonActivity::onEnter() {
   Activity::onEnter();
+  RenderLock lock;
   reset();
+  loadSession();
   requestUpdate();
+}
+
+void BackgammonActivity::onExit() {
+  saveSession();
+  Activity::onExit();
+}
+
+void BackgammonActivity::prepareForSleep() { saveSession(); }
+
+bool BackgammonActivity::saveSession() {
+  if (!sessionDirty) return true;
+  uint8_t data[SESSION_SIZE]{};
+  data[0] = 1;
+  for (int i = 0; i < 24; ++i) data[1 + i] = st.pts[i] + 15;
+  for (int i = 0; i < 2; ++i) {
+    data[25 + i] = st.bar[i];
+    data[27 + i] = st.off[i];
+  }
+  data[29] = whiteTurn;
+  data[30] = phase;
+  data[31] = diceCount;
+  for (int i = 0; i < diceCount; ++i) data[32 + i] = diceLeft[i];
+  data[36] = diceRolledCount;
+  for (int i = 0; i < diceRolledCount; ++i) data[37 + i] = diceRolled[i];
+  data[41] = gameOver;
+  data[42] = whiteWon;
+  data[43] = aiPending;
+  data[44] = aiPlaying;
+  data[45] = aiPlaying ? aiStepCount : 0;
+  data[46] = aiPlaying ? aiStepIndex : 0;
+  for (int i = 0; i < data[45]; ++i) {
+    data[47 + 4 * i] = aiSteps[i].from;
+    data[48 + 4 * i] = aiSteps[i].to;
+    data[49 + 4 * i] = aiSteps[i].die;
+    data[50 + 4 * i] = aiSteps[i].hit;
+  }
+  data[63] = selected + 1;
+  data[64] = cursorPoint;
+  if (!GameSession::save(GameSession::Game::Backgammon, vsAi, data, sizeof(data))) return false;
+  sessionDirty = false;
+  return true;
+}
+
+bool BackgammonActivity::loadSession() {
+  uint8_t data[SESSION_SIZE]{};
+  if (!GameSession::load(GameSession::Game::Backgammon, vsAi, data, sizeof(data))) return false;
+  auto invalid = [] {
+    LOG_ERR("BACKGAMMON", "Invalid saved session");
+    return false;
+  };
+  if (data[0] != 1 || data[29] > 1 || data[30] > OVER || data[31] > 4 || data[36] > 4 || data[41] > 1 || data[42] > 1 ||
+      data[43] > 1 || data[44] > 1 || data[45] > 4 || data[46] > data[45] || data[63] > 25 || data[64] >= 24)
+    return invalid();
+  State loaded;
+  int totals[2]{};
+  for (int i = 0; i < 24; ++i) {
+    if (data[1 + i] > 30) return invalid();
+    loaded.pts[i] = static_cast<int>(data[1 + i]) - 15;
+    totals[loaded.pts[i] > 0 ? 0 : 1] += std::abs(static_cast<int>(loaded.pts[i]));
+  }
+  for (int i = 0; i < 2; ++i) {
+    if (data[25 + i] > 15 || data[27 + i] > 15) return invalid();
+    loaded.bar[i] = data[25 + i];
+    loaded.off[i] = data[27 + i];
+    if (totals[i] + loaded.bar[i] + loaded.off[i] != 15) return invalid();
+  }
+  if ((data[30] == OVER) != static_cast<bool>(data[41]) ||
+      (loaded.off[0] == 15 || loaded.off[1] == 15) != static_cast<bool>(data[41]) ||
+      (data[41] && (loaded.off[data[42] ? 0 : 1] != 15 || data[29] != data[42])) ||
+      (loaded.off[0] == 15 && loaded.off[1] == 15))
+    return invalid();
+  if (data[30] == ROLL) {
+    if (data[31] != 0 || data[36] != 0 || data[44]) return invalid();
+  } else {
+    if ((data[36] != 2 && data[36] != 4) || data[31] > data[36]) return invalid();
+    uint8_t available[7]{};
+    for (int i = 0; i < data[36]; ++i) {
+      const uint8_t die = data[37 + i];
+      if (die < 1 || die > 6) return invalid();
+      if (data[36] == 4 && die != data[37]) return invalid();
+      available[die]++;
+    }
+    if (data[36] == 2 && data[37] == data[38]) return invalid();
+    for (int i = 0; i < data[31]; ++i) {
+      const uint8_t die = data[32 + i];
+      if (die < 1 || die > 6 || available[die] == 0) return invalid();
+      available[die]--;
+    }
+    if (data[30] == MOVE && data[31] == 0 && !(data[44] && data[46] == data[45])) return invalid();
+  }
+  if ((data[43] || data[44]) && (!vsAi || data[29] || data[41])) return invalid();
+  if (data[43] && data[44]) return invalid();
+  if (vsAi && !data[29] && !data[41] && !data[43] && !data[44]) return invalid();
+  if (!data[44] && (data[45] != 0 || data[46] != 0)) return invalid();
+  if (data[44] && (data[30] != MOVE || data[45] - data[46] > data[31])) return invalid();
+  if (data[63] != 0) {
+    const int source = data[63] - 1;
+    if (data[30] != MOVE || data[44] ||
+        (source == SRC_BAR ? loaded.bar[data[29] ? 0 : 1] == 0 : !owns(loaded.pts[source], data[29])))
+      return invalid();
+  }
+  // A saved playback must still be a maximal legal continuation of this board.
+  if (data[44]) {
+    State replay = loaded;
+    uint8_t rest[4]{};
+    int restCount = data[31];
+    for (int i = 0; i < restCount; ++i) rest[i] = data[32 + i];
+    for (int i = 0; i < data[45]; ++i) {
+      if (data[47 + 4 * i] > SRC_BAR || data[48 + 4 * i] > DST_OFF || data[49 + 4 * i] < 1 || data[49 + 4 * i] > 6 ||
+          data[50 + 4 * i] > 1)
+        return invalid();
+      if (i < data[46]) continue;
+      std::vector<Step> legal;
+      legalFirstSteps(replay, false, rest, restCount, legal);
+      bool found = false;
+      for (const auto& step : legal) {
+        if (step.from != data[47 + 4 * i] || step.to != data[48 + 4 * i] || step.die != data[49 + 4 * i] ||
+            step.hit != static_cast<bool>(data[50 + 4 * i]))
+          continue;
+        applyStep(replay, false, step);
+        for (int d = 0; d < restCount; ++d) {
+          if (rest[d] != step.die) continue;
+          for (int j = d; j + 1 < restCount; ++j) rest[j] = rest[j + 1];
+          --restCount;
+          break;
+        }
+        found = true;
+        break;
+      }
+      if (!found) return invalid();
+    }
+    if (replay.off[1] != 15 && maxUsable(replay, false, rest, restCount) != 0) return invalid();
+  }
+  st = loaded;
+  whiteTurn = data[29];
+  phase = static_cast<Phase>(data[30]);
+  diceCount = data[31];
+  std::memcpy(diceLeft, data + 32, sizeof(diceLeft));
+  diceRolledCount = data[36];
+  std::memcpy(diceRolled, data + 37, sizeof(diceRolled));
+  gameOver = data[41];
+  whiteWon = data[42];
+  aiPending = data[43];
+  aiPlaying = data[44];
+  aiStepCount = data[45];
+  aiStepIndex = data[46];
+  for (int i = 0; i < aiStepCount; ++i)
+    aiSteps[i] = Step{static_cast<int8_t>(data[47 + 4 * i]), static_cast<int8_t>(data[48 + 4 * i]), data[49 + 4 * i],
+                      static_cast<bool>(data[50 + 4 * i])};
+  selected = static_cast<int>(data[63]) - 1;
+  cursorPoint = data[64];
+  aiNextStepAt = 0;
+  sessionDirty = false;
+  return true;
 }
 
 void BackgammonActivity::reset() {
@@ -45,6 +205,11 @@ void BackgammonActivity::reset() {
   whiteWon = false;
   statusOverride = nullptr;
   aiPending = false;
+  aiPlaying = false;
+  aiStepCount = aiStepIndex = 0;
+  aiNextStepAt = 0;
+  confirmRestart = false;
+  sessionDirty = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +228,7 @@ bool BackgammonActivity::canBearOff(const State& s, const bool white) {
 
 void BackgammonActivity::genSteps(const State& s, const bool white, const uint8_t die, std::vector<Step>& out) {
   out.clear();
+  out.reserve(24);
   const int8_t enemyBlot = white ? -1 : 1;
 
   auto landingOk = [&](int idx) {
@@ -171,6 +337,7 @@ int BackgammonActivity::maxUsable(const State& s, const bool white, const uint8_
         if (j != i) rest[n++] = dice[j];
       const int total = 1 + maxUsable(next, white, rest, n);
       if (total > best) best = total;
+      if (best == count) return best;
     }
   }
   return best;
@@ -179,6 +346,7 @@ int BackgammonActivity::maxUsable(const State& s, const bool white, const uint8_
 void BackgammonActivity::legalFirstSteps(const State& s, const bool white, const uint8_t* dice, const int count,
                                          std::vector<Step>& out) {
   out.clear();
+  out.reserve(48);
   if (count <= 0) return;
   const int global = maxUsable(s, white, dice, count);
   if (global == 0) return;
@@ -205,7 +373,8 @@ void BackgammonActivity::legalFirstSteps(const State& s, const bool white, const
   // Mixed roll where only one die can be played: the higher die is forced.
   if (global == 1 && count == 2 && dice[0] != dice[1]) {
     const uint8_t hi = dice[0] > dice[1] ? dice[0] : dice[1];
-    out.erase(std::remove_if(out.begin(), out.end(), [hi](const Step& m) { return m.die != hi; }), out.end());
+    if (std::any_of(out.begin(), out.end(), [hi](const Step& m) { return m.die == hi; }))
+      out.erase(std::remove_if(out.begin(), out.end(), [hi](const Step& m) { return m.die != hi; }), out.end());
   }
 }
 
@@ -227,12 +396,14 @@ void BackgammonActivity::rollDice() {
   for (int i = 0; i < diceCount; i++) diceRolled[i] = diceLeft[i];
   diceRolledCount = diceCount;
   phase = MOVE;
+  sessionDirty = true;
   selected = -1;
   if (!anyStepAvailable()) {
     statusOverride = tr(STR_NO_MOVE);
     diceCount = 0;
     endTurn();
   }
+  saveSession();
   requestUpdate();
 }
 
@@ -258,10 +429,15 @@ void BackgammonActivity::endTurn() {
   phase = ROLL;
   diceCount = 0;
   diceRolledCount = 0;
-  if (vsAi && !whiteTurn && !gameOver) aiPending = true;
+  aiPlaying = false;
+  aiStepCount = aiStepIndex = 0;
+  aiNextStepAt = 0;
+  aiPending = vsAi && !whiteTurn && !gameOver;
+  sessionDirty = true;
 }
 
 void BackgammonActivity::handlePointChosen(const int point) {
+  if (gameOver || (vsAi && !whiteTurn)) return;
   if (phase == ROLL) {
     rollDice();
     return;
@@ -274,6 +450,7 @@ void BackgammonActivity::handlePointChosen(const int point) {
     // Bar checkers must enter first: force the bar as source.
     if (st.bar[me] > 0) {
       selected = SRC_BAR;
+      sessionDirty = true;
       requestUpdate();
       return;
     }
@@ -284,6 +461,7 @@ void BackgammonActivity::handlePointChosen(const int point) {
       for (const auto& m : steps) {
         if (m.from == point) {
           selected = point;
+          sessionDirty = true;
           break;
         }
       }
@@ -294,17 +472,19 @@ void BackgammonActivity::handlePointChosen(const int point) {
 
   if (point == selected) {
     selected = -1;
+    sessionDirty = true;
     requestUpdate();
     return;
   }
 
-  // Find a fully legal step from selected to this destination.
-  std::vector<Step> steps;
-  legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
-  for (const auto& m : steps) {
-    if (m.from != selected || m.to != point) continue;
-    applyStep(st, whiteTurn, m);
-    consumeDie(m.die);
+  Step path[4]{};
+  int count = 0;
+  if (findSequence(selected, point, path, count)) {
+    for (int i = 0; i < count; ++i) {
+      applyStep(st, whiteTurn, path[i]);
+      consumeDie(path[i].die);
+    }
+    sessionDirty = true;
     selected = -1;
     if (st.off[me] == 15) {
       gameOver = true;
@@ -318,6 +498,7 @@ void BackgammonActivity::handlePointChosen(const int point) {
       diceCount = 0;
       endTurn();
     }
+    saveSession();
     requestUpdate();
     return;
   }
@@ -328,7 +509,47 @@ void BackgammonActivity::handlePointChosen(const int point) {
   } else {
     selected = -1;
   }
+  sessionDirty = true;
   requestUpdate();
+}
+
+bool BackgammonActivity::findSequence(const int source, const int destination, Step out[4], int& count) const {
+  count = 0;
+  if (source < 0 || source > SRC_BAR || destination < 0 || destination > DST_OFF || phase != MOVE) return false;
+  return findSequenceFrom(st, whiteTurn, diceLeft, diceCount, source, destination, out, count, 0);
+}
+
+bool BackgammonActivity::findSequenceFrom(const State& s, const bool white, const uint8_t* dice, const int count,
+                                          const int source, const int destination, Step out[4], int& outCount,
+                                          const int depth) {
+  if (count <= 0 || depth >= 4) return false;
+  std::vector<Step> legal;
+  legalFirstSteps(s, white, dice, count, legal);
+  for (const auto& step : legal) {
+    if (step.from == source && step.to == destination) {
+      out[depth] = step;
+      outCount = depth + 1;
+      return true;
+    }
+  }
+  for (const auto& step : legal) {
+    if (step.from != source || step.to == DST_OFF) continue;
+    State next = s;
+    applyStep(next, white, step);
+    uint8_t rest[4]{};
+    int restCount = 0;
+    bool removed = false;
+    for (int i = 0; i < count; ++i) {
+      if (!removed && dice[i] == step.die) {
+        removed = true;
+      } else {
+        rest[restCount++] = dice[i];
+      }
+    }
+    out[depth] = step;
+    if (findSequenceFrom(next, white, rest, restCount, step.to, destination, out, outCount, depth + 1)) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,10 +560,10 @@ int BackgammonActivity::evaluate(const State& s) {
   int score = (pipCount(s, false) - pipCount(s, true)) * 8;
   for (int i = 0; i < 24; i++) {
     const int v = s.pts[i];
-    if (v == 1) score -= 12;                       // white blot
-    if (v >= 2) score += 15 + (i < 6 ? 8 : 0);     // white made point
-    if (v == -1) score += 12;                      // black blot
-    if (v <= -2) score -= 15 + (i > 17 ? 8 : 0);   // black made point
+    if (v == 1) score -= 12;                      // white blot
+    if (v >= 2) score += 15 + (i < 6 ? 8 : 0);    // white made point
+    if (v == -1) score += 12;                     // black blot
+    if (v <= -2) score -= 15 + (i > 17 ? 8 : 0);  // black made point
   }
   score += 25 * (s.bar[1] - s.bar[0]);
   score += 30 * (s.off[0] - s.off[1]);
@@ -350,18 +571,23 @@ int BackgammonActivity::evaluate(const State& s) {
 }
 
 void BackgammonActivity::dfsSequences(const State& s, const bool white, const uint8_t* dice, const int count,
-                                      AiCtx& ctx) {
+                                      AiCtx& ctx, const int depth) {
   if (ctx.nodes > 20000) return;
   ctx.nodes++;
+  if ((ctx.nodes & 511) == 0) vTaskDelay(1);
   std::vector<Step> steps;
   legalFirstSteps(s, white, dice, count, steps);
-  if (steps.empty() || count == 0) {
-    // Terminal position for a maximal legal sequence; dedupe.
-    for (const auto& r : ctx.results)
-      if (std::memcmp(&r, &s, sizeof(State)) == 0) return;
-    ctx.results.push_back(s);
+  if (steps.empty() || count == 0 || s.off[white ? 0 : 1] == 15) {
+    const int score = evaluate(s);
+    if (!ctx.hasBest || (white ? score > ctx.bestScore : score < ctx.bestScore)) {
+      ctx.hasBest = true;
+      ctx.bestScore = score;
+      ctx.bestCount = depth;
+      for (int i = 0; i < depth; ++i) ctx.bestSteps[i] = ctx.path[i];
+    }
     return;
   }
+  if (depth >= 4) return;
   for (const auto& m : steps) {
     State next = s;
     applyStep(next, white, m);
@@ -375,62 +601,79 @@ void BackgammonActivity::dfsSequences(const State& s, const bool white, const ui
       }
       rest[n++] = dice[j];
     }
-    dfsSequences(next, white, rest, n, ctx);
+    ctx.path[depth] = m;
+    dfsSequences(next, white, rest, n, ctx, depth + 1);
   }
 }
 
 void BackgammonActivity::runAi() {
+  RenderLock lock;
   if (gameOver || whiteTurn) {
     aiPending = false;
     return;
   }
-  // Roll for the AI.
   statusOverride = nullptr;
-  const uint8_t d1 = 1 + esp_random() % 6;
-  const uint8_t d2 = 1 + esp_random() % 6;
-  diceCount = 0;
-  if (d1 == d2) {
-    for (int i = 0; i < 4; i++) diceLeft[diceCount++] = d1;
-  } else {
-    diceLeft[diceCount++] = d1;
-    diceLeft[diceCount++] = d2;
+  if (phase == ROLL) {
+    const uint8_t d1 = 1 + esp_random() % 6;
+    const uint8_t d2 = 1 + esp_random() % 6;
+    diceCount = d1 == d2 ? 4 : 2;
+    diceLeft[0] = d1;
+    diceLeft[1] = d2;
+    if (diceCount == 4) diceLeft[2] = diceLeft[3] = d1;
+    for (int i = 0; i < diceCount; ++i) diceRolled[i] = diceLeft[i];
+    diceRolledCount = diceCount;
+    phase = MOVE;
   }
-  for (int i = 0; i < diceCount; i++) diceRolled[i] = diceLeft[i];
-  diceRolledCount = diceCount;
-  phase = MOVE;
-
   AiCtx ctx;
-  uint8_t dice[4];
-  for (int i = 0; i < diceCount; i++) dice[i] = diceLeft[i];
-  dfsSequences(st, false, dice, diceCount, ctx);
-
+  dfsSequences(st, false, diceLeft, diceCount, ctx);
+  if (!ctx.hasBest) {
+    LOG_ERR("BACKGAMMON", "AI search found no legal continuation");
+    return;
+  }
+  aiStepCount = ctx.bestCount;
+  aiStepIndex = 0;
+  for (int i = 0; i < aiStepCount; ++i) aiSteps[i] = ctx.bestSteps[i];
   aiPending = false;
-  if (ctx.results.empty()) {
-    statusOverride = tr(STR_NO_MOVE);
+  aiPlaying = true;
+  selected = -1;
+  if (aiStepCount == 0) statusOverride = tr(STR_NO_MOVE);
+  sessionDirty = true;
+  saveSession();
+  lock.unlock();
+  requestUpdateAndWait();
+  aiNextStepAt = millis() + AI_STEP_PAUSE_MS;
+}
+
+void BackgammonActivity::advanceAi() {
+  if (!aiPlaying) return;
+  if (aiNextStepAt == 0) {
+    requestUpdateAndWait();
+    aiNextStepAt = millis() + AI_STEP_PAUSE_MS;
+    return;
+  }
+  if (static_cast<int32_t>(millis() - aiNextStepAt) < 0) return;
+  RenderLock lock;
+  if (aiStepIndex == aiStepCount) {
     endTurn();
+    saveSession();
     requestUpdate();
     return;
   }
-  // AI plays black: minimize the white-perspective evaluation.
-  int bestIdx = 0;
-  int bestScore = evaluate(ctx.results[0]);
-  for (size_t i = 1; i < ctx.results.size(); i++) {
-    const int sc = evaluate(ctx.results[i]);
-    if (sc < bestScore) {
-      bestScore = sc;
-      bestIdx = i;
-    }
-  }
-  st = ctx.results[bestIdx];
-  diceCount = 0;
+  const Step step = aiSteps[aiStepIndex++];
+  applyStep(st, false, step);
+  consumeDie(step.die);
   if (st.off[1] == 15) {
     gameOver = true;
     whiteWon = false;
     phase = OVER;
-  } else {
-    endTurn();
+    aiPlaying = false;
+    aiStepCount = aiStepIndex = 0;
   }
-  requestUpdate();
+  sessionDirty = true;
+  saveSession();
+  lock.unlock();
+  requestUpdateAndWait();
+  aiNextStepAt = millis() + AI_STEP_PAUSE_MS;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,12 +697,66 @@ int BackgammonActivity::pointFromTouch(const int x, const int y) const {
 }
 
 void BackgammonActivity::loop() {
+  RenderLock lock;
+  int tx = 0, ty = 0;
+  const bool tapped = mappedInput.wasScreenTapped(tx, ty);
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) backLongHandled = false;
+  if (!backLongHandled && mappedInput.isPressed(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime() >= RESTART_HOLD_MS) {
+    backLongHandled = true;
+    confirmRestart = true;
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back) && backLongHandled) {
+    backLongHandled = false;
+    return;
+  }
+
+  if (confirmRestart) {
+    const int width = renderer.getScreenWidth();
+    const int height = renderer.getScreenHeight();
+    const bool dialogTap = tapped && tx >= 24 && tx < width - 24 && ty >= height / 2 + 8 && ty < height / 2 + 48;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || (dialogTap && tx >= width / 2)) {
+      reset();
+      saveSession();
+      requestUpdate();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back) || (dialogTap && tx < width / 2)) {
+      confirmRestart = false;
+      aiNextStepAt = 0;
+      requestUpdate();
+    }
+    return;
+  }
+
+  if (tapped && tx >= restartX && tx < restartX + restartW && ty >= restartY && ty < restartY + restartH) {
+    confirmRestart = true;
+    requestUpdate();
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    if (selected >= 0) {
+      selected = -1;
+      sessionDirty = true;
+      requestUpdate();
+    } else {
+      finish();
+    }
+    return;
+  }
+
+  if (aiPlaying) {
+    lock.unlock();
+    advanceAi();
+    return;
+  }
   if (aiPending) {
+    lock.unlock();
     runAi();
     return;
   }
 
-  // Cursor navigation across the 24 points.
   auto colOf = [](int idx) { return idx >= 12 ? idx - 12 : 11 - idx; };
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this, colOf] {
     int col = colOf(cursorPoint);
@@ -482,51 +779,28 @@ void BackgammonActivity::loop() {
     requestUpdate();
   });
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    if (selected >= 0) {
-      selected = -1;
-      requestUpdate();
-    } else {
-      finish();
-    }
-    return;
-  }
-
+  if (gameOver) return;
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
+    // Confirm the selected source again to bear off when a legal route exists.
+    Step path[4]{};
+    int count = 0;
+    if (selected >= 0 && cursorPoint == selected && findSequence(selected, DST_OFF, path, count)) {
+      handlePointChosen(DST_OFF);
     } else {
       handlePointChosen(cursorPoint);
     }
     return;
   }
 
-  int tx = 0, ty = 0;
-  if (mappedInput.wasScreenTapped(tx, ty)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
-      return;
-    }
-    // Bear-off by tapping the bar column on your own half while a bear-off
-    // step is available from the selected point.
-    if (phase == MOVE && selected >= 0 && selected != SRC_BAR) {
-      const int p = pointFromTouch(tx, ty);
-      if (p == SRC_BAR) {
-        const bool ownHalf = whiteTurn ? (ty > boardY + boardH / 2) : (ty < boardY + boardH / 2);
-        if (ownHalf) {
-          handlePointChosen(DST_OFF);
-          return;
-        }
-      }
-      if (p >= 0) {
-        if (p != SRC_BAR) cursorPoint = p;
-        handlePointChosen(p);
-      }
-      return;
-    }
+  if (tapped) {
     const int p = pointFromTouch(tx, ty);
+    if (phase == MOVE && selected >= 0 && selected != SRC_BAR && p == SRC_BAR) {
+      const bool ownHalf = whiteTurn ? ty > boardY + boardH / 2 : ty < boardY + boardH / 2;
+      if (ownHalf) {
+        handlePointChosen(DST_OFF);
+        return;
+      }
+    }
     if (p >= 0) {
       if (p != SRC_BAR) cursorPoint = p;
       handlePointChosen(p);
@@ -542,8 +816,8 @@ void BackgammonActivity::loop() {
 
 void BackgammonActivity::drawChecker(const int cx, const int cy, const int r, const bool white) const {
   // 12-gon disk with a contrasting rim: black on white checkers, white on black.
-  static const int DX[12] = {100, 87, 50, 0, -50, -87, -100, -87, -50, 0, 50, 87};
-  static const int DY[12] = {0, 50, 87, 100, 87, 50, 0, -50, -87, -100, -87, -50};
+  static constexpr int DX[12] = {100, 87, 50, 0, -50, -87, -100, -87, -50, 0, 50, 87};
+  static constexpr int DY[12] = {0, 50, 87, 100, 87, 50, 0, -50, -87, -100, -87, -50};
   int xs[12], ys[12];
   for (int i = 0; i < 12; i++) {
     xs[i] = cx + r * DX[i] / 100;
@@ -565,13 +839,13 @@ void BackgammonActivity::drawDice() const {
   const int totalW = diceRolledCount * box + (diceRolledCount - 1) * gap;
   const int x0 = boardX + (boardW - totalW) / 2;
   const int y0 = boardY + boardH / 2 - box / 2;
-  static const int PIP[6][6] = {
-      {4, -1, -1, -1, -1, -1},   // 1
-      {0, 8, -1, -1, -1, -1},    // 2
-      {0, 4, 8, -1, -1, -1},     // 3
-      {0, 2, 6, 8, -1, -1},      // 4
-      {0, 2, 4, 6, 8, -1},       // 5
-      {0, 2, 3, 5, 6, 8},        // 6
+  static constexpr int PIP[6][6] = {
+      {4, -1, -1, -1, -1, -1},  // 1
+      {0, 8, -1, -1, -1, -1},   // 2
+      {0, 4, 8, -1, -1, -1},    // 3
+      {0, 2, 6, 8, -1, -1},     // 4
+      {0, 2, 4, 6, 8, -1},      // 5
+      {0, 2, 3, 5, 6, 8},       // 6
   };
   // Count how many of each value remain to play.
   int left[7] = {};
@@ -581,19 +855,14 @@ void BackgammonActivity::drawDice() const {
     const int v = diceRolled[d];
     const int x = x0 + d * (box + gap);
     const bool spent = left[v] > 0 ? (left[v]--, false) : true;
-    if (spent) {
-      // Used die: light dithered box, outline only.
-      renderer.fillRoundedRect(x, y0, box, box, 6, LightGray);
-      renderer.drawRoundedRect(x, y0, box, box, 1, 6, DarkGray);
-    } else {
-      renderer.fillRoundedRect(x, y0, box, box, 6, White);
-      renderer.drawRoundedRect(x, y0, box, box, 2, 6, Black);
-      for (int i = 0; i < 6 && PIP[v - 1][i] >= 0; i++) {
-        const int gx = PIP[v - 1][i] % 3;
-        const int gy = PIP[v - 1][i] / 3;
-        gameart::disk(renderer, gx * 50, gy * 50, 22, x + box / 10, y0 + box / 10, box * 8 / 10, true);
-      }
+    renderer.fillRoundedRect(x, y0, box, box, 6, spent ? LightGray : White);
+    renderer.drawRoundedRect(x, y0, box, box, spent ? 2 : 3, 6, Black);
+    for (int i = 0; i < 6 && PIP[v - 1][i] >= 0; i++) {
+      const int gx = PIP[v - 1][i] % 3;
+      const int gy = PIP[v - 1][i] / 3;
+      gameart::disk(renderer, gx * 50, gy * 50, spent ? 16 : 20, x + box / 10, y0 + box / 10, box * 8 / 10, true);
     }
+    if (spent) renderer.drawLine(x + 8, y0 + box + 3, x + box - 8, y0 + box + 3, 2, true);
   }
 }
 
@@ -619,8 +888,15 @@ void BackgammonActivity::render(RenderLock&&) {
   }
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, status);
 
-  const int top = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 10;
-  const int bottomReserve = metrics.buttonHintsHeight + 8;
+  restartW = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_NEW_GAME)) + 24;
+  restartH = renderer.getTextHeight(UI_10_FONT_ID) + 12;
+  restartX = (pageWidth - restartW) / 2;
+  restartY = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 4;
+  renderer.drawRoundedRect(restartX, restartY, restartW, restartH, 2, 4, Black);
+  renderer.drawCenteredText(UI_10_FONT_ID, restartY + 6, tr(STR_NEW_GAME));
+
+  const int top = restartY + restartH + 8;
+  const int bottomReserve = metrics.buttonHintsHeight + renderer.getTextHeight(UI_10_FONT_ID) + 12;
   boardX = 8;
   boardW = pageWidth - 16;
   boardY = top;
@@ -644,13 +920,19 @@ void BackgammonActivity::render(RenderLock&&) {
     const bool dark = (col & 1) == 0;
     int xs[3], ys[3];
     if (topRow) {
-      xs[0] = x;          ys[0] = boardY;
-      xs[1] = x + pointW; ys[1] = boardY;
-      xs[2] = x + pointW / 2; ys[2] = boardY + triH;
+      xs[0] = x;
+      ys[0] = boardY;
+      xs[1] = x + pointW;
+      ys[1] = boardY;
+      xs[2] = x + pointW / 2;
+      ys[2] = boardY + triH;
     } else {
-      xs[0] = x;          ys[0] = boardY + boardH;
-      xs[1] = x + pointW; ys[1] = boardY + boardH;
-      xs[2] = x + pointW / 2; ys[2] = boardY + boardH - triH;
+      xs[0] = x;
+      ys[0] = boardY + boardH;
+      xs[1] = x + pointW;
+      ys[1] = boardY + boardH;
+      xs[2] = x + pointW / 2;
+      ys[2] = boardY + boardH - triH;
     }
     if (dark) {
       renderer.fillPolygon(xs, ys, 3, true);
@@ -704,30 +986,47 @@ void BackgammonActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, diceZoneY + 4, buf);
   }
 
-  // Legal destination markers for the selected source (rule-filtered steps).
+  // Each marker represents a legal route of one or more dice for this checker.
   if (selected >= 0 && phase == MOVE) {
-    std::vector<Step> steps;
-    legalFirstSteps(st, whiteTurn, diceLeft, diceCount, steps);
-    for (const auto& m : steps) {
-      if (m.from != selected) continue;
-      if (m.to == DST_OFF) {
+    for (int destination = 0; destination <= DST_OFF; ++destination) {
+      Step route[4]{};
+      int count = 0;
+      if (!findSequence(selected, destination, route, count)) continue;
+      if (destination == DST_OFF) {
         // Dot on the bar column, own half.
         const int cy = whiteTurn ? boardY + boardH / 2 + 20 : boardY + boardH / 2 - 20;
-        gameart::disk(renderer, 0, 0, 10, boardX + 6 * pointW + barW / 2 - 10, cy - 10, 20, true);
+        gameart::disk(renderer, 0, 0, 10, boardX + 6 * pointW + barW / 2 - 10, cy - 10, 20, false);
       } else {
-        const bool topRow = m.to >= 12;
-        const int col = topRow ? m.to - 12 : 11 - m.to;
+        const bool topRow = destination >= 12;
+        const int col = topRow ? destination - 12 : 11 - destination;
         const int x = boardX + col * pointW + (col >= 6 ? barW : 0);
         const int cx = x + pointW / 2;
         const int cy = topRow ? boardY + triH - 10 : boardY + boardH - triH + 10;
-        gameart::disk(renderer, 0, 0, 10, cx - 10, cy - 10, 20, true);
+        renderer.fillRect(cx - 10, cy - 10, 20, 20, false);
+        gameart::disk(renderer, 0, 0, 8, cx - 10, cy - 10, 20, true);
       }
     }
   }
 
   drawDice();
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT), "", "");
+  renderer.drawCenteredText(UI_10_FONT_ID,
+                            pageHeight - metrics.buttonHintsHeight - renderer.getTextHeight(UI_10_FONT_ID) - 4,
+                            tr(STR_GAME_NEW_GAME_HINT));
+  if (confirmRestart) {
+    const int y = pageHeight / 2 - 56;
+    renderer.fillRoundedRect(16, y, pageWidth - 32, 112, 8, White);
+    renderer.drawRoundedRect(16, y, pageWidth - 32, 112, 3, 8, Black);
+    renderer.drawCenteredText(UI_10_FONT_ID, y + 20, tr(STR_NEW_GAME));
+    renderer.drawRect(24, y + 64, pageWidth / 2 - 24, 40, 2, true);
+    renderer.drawRect(pageWidth / 2, y + 64, pageWidth / 2 - 24, 40, 2, true);
+    renderer.drawText(UI_10_FONT_ID, pageWidth / 4 - renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CANCEL)) / 2, y + 74,
+                      tr(STR_CANCEL));
+    renderer.drawText(UI_10_FONT_ID, 3 * pageWidth / 4 - renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CONFIRM)) / 2,
+                      y + 74, tr(STR_CONFIRM));
+  }
+  const auto labels = mappedInput.mapLabels(confirmRestart ? tr(STR_CANCEL) : tr(STR_BACK),
+                                            confirmRestart ? tr(STR_CONFIRM) : tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   const bool halfRefresh = (renderCount % 12) == 0;

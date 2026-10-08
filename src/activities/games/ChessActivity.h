@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -16,6 +17,8 @@ class ChessActivity final : public Activity {
       : Activity("Chess", renderer, mappedInput), vsAi(vsAi) {}
 
   void onEnter() override;
+  void onExit() override;
+  void prepareForSleep() override;
   void loop() override;
   void render(RenderLock&&) override;
 
@@ -44,23 +47,28 @@ class ChessActivity final : public Activity {
   static constexpr int MATE = 1000000;
   static constexpr int AI_DEPTH = 3;
   static constexpr int NODE_LIMIT = 60000;
+  static constexpr uint8_t SESSION_VERSION = 1;
+  static constexpr size_t SESSION_SIZE = 68;  // version, board[64], turn, castling, en passant
 
   Position pos;
-  std::vector<Move> legalMoves;       // legal moves for the side to move
-  std::vector<const Move*> targets;   // legal moves from `selected`
-  int selected = -1;                  // selected square, -1 = none
+  std::vector<Move> legalMoves;      // legal moves for the side to move
+  std::vector<const Move*> targets;  // legal moves from `selected`
+  int selected = -1;                 // selected square, -1 = none
   int cursorRow = 6;
   int cursorCol = 4;
   bool gameOver = false;
   const char* statusOverride = nullptr;  // end-of-game message
   bool aiPending = false;
+  bool confirmRestart = false;
+  bool backLongHandled = false;
+  bool sessionDirty = true;
   int renderCount = 0;
   bool vsAi;
 
   // Promotion picker: set when the human plays a pawn to the last rank.
-  Move promoCands[4]{};   // candidate moves (Q, N, R, B) for the pending promotion
-  int promoCount = 0;     // 0 = no pending promotion
-  int promoSel = 0;       // highlighted option (keyboard navigation)
+  Move promoCands[4]{};  // candidate moves (Q, N, R, B) for the pending promotion
+  int promoCount = 0;    // 0 = no pending promotion
+  int promoSel = 0;      // highlighted option (keyboard navigation)
 
   // Search state (member to avoid passing through every call).
   int nodes = 0;
@@ -74,10 +82,16 @@ class ChessActivity final : public Activity {
   int promoBoxY = 0;
   int promoBoxW = 0;
   int promoBoxH = 0;
+  int restartX = 0;
+  int restartY = 0;
+  int restartW = 0;
+  int restartH = 0;
 
   ButtonNavigator buttonNavigator;
 
   void reset();
+  bool loadSession();
+  bool saveSession();
   static bool isWhite(int p) { return p > 0; }
   static int pieceOf(int p) { return p > 0 ? p : -p; }
 

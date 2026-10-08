@@ -1,13 +1,14 @@
 #include "ChessActivity.h"
 
+#include <GameSession.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <esp_random.h>
 
 #include <algorithm>
 #include <cstdlib>
-
-#include <esp_random.h>
 
 #include "PieceArt.h"
 #include "components/UITheme.h"
@@ -25,6 +26,7 @@ constexpr int8_t INITIAL_BOARD[64] = {
     4,  2,  3,  5,  6,  3,  2,  4,   //
 };
 constexpr int PIECE_VALUE[7] = {0, 100, 320, 330, 500, 900, 0};
+constexpr unsigned long RESTART_HOLD_MS = 700;
 
 // Piece-square tables, white perspective, index 0 = a8 (top-left as drawn).
 // Black reads the vertically mirrored square.
@@ -93,20 +95,124 @@ constexpr int PST_KING[64] = {
 
 const int* pstFor(const int type) {
   switch (type) {
-    case 1: return PST_PAWN;
-    case 2: return PST_KNIGHT;
-    case 3: return PST_BISHOP;
-    case 4: return PST_ROOK;
-    case 5: return PST_QUEEN;
-    default: return PST_KING;
+    case 1:
+      return PST_PAWN;
+    case 2:
+      return PST_KNIGHT;
+    case 3:
+      return PST_BISHOP;
+    case 4:
+      return PST_ROOK;
+    case 5:
+      return PST_QUEEN;
+    default:
+      return PST_KING;
   }
 }
 }  // namespace
 
 void ChessActivity::onEnter() {
   Activity::onEnter();
-  reset();
+  if (!loadSession()) {
+    reset();
+    saveSession();
+  }
   requestUpdate();
+}
+
+void ChessActivity::onExit() {
+  saveSession();
+  Activity::onExit();
+}
+
+void ChessActivity::prepareForSleep() { saveSession(); }
+
+bool ChessActivity::loadSession() {
+  uint8_t data[SESSION_SIZE];
+  if (!GameSession::load(GameSession::Game::Chess, vsAi, data, sizeof(data))) return false;
+  if (data[0] != SESSION_VERSION || data[65] > 1 || data[66] > 0x0F || data[67] > 64) {
+    LOG_ERR("CHESS", "Invalid session metadata");
+    return false;
+  }
+  Position loaded;
+  int kings[2]{};
+  int pieces[2]{};
+  int pawns[2]{};
+  int kingSquare[2] = {-1, -1};
+  for (int i = 0; i < 64; ++i) {
+    const int piece = data[i + 1] <= 127 ? data[i + 1] : static_cast<int>(data[i + 1]) - 256;
+    if (piece < -KING || piece > KING || (pieceOf(piece) == PAWN && (i / 8 == 0 || i / 8 == 7))) {
+      LOG_ERR("CHESS", "Invalid session piece at %d", i);
+      return false;
+    }
+    loaded.b[i] = static_cast<int8_t>(piece);
+    if (piece != EMPTY) {
+      const int side = piece > 0 ? 0 : 1;
+      ++pieces[side];
+      if (pieceOf(piece) == PAWN) ++pawns[side];
+      if (pieceOf(piece) == KING) {
+        ++kings[side];
+        kingSquare[side] = i;
+      }
+    }
+  }
+  if (kings[0] != 1 || kings[1] != 1 || pieces[0] > 16 || pieces[1] > 16 || pawns[0] > 8 || pawns[1] > 8 ||
+      (std::abs(kingSquare[0] / 8 - kingSquare[1] / 8) <= 1 && std::abs(kingSquare[0] % 8 - kingSquare[1] % 8) <= 1)) {
+    LOG_ERR("CHESS", "Invalid session material");
+    return false;
+  }
+  loaded.whiteTurn = data[65] != 0;
+  loaded.castling = data[66];
+  loaded.ep = static_cast<int8_t>(static_cast<int>(data[67]) - 1);
+  if (((loaded.castling & 0x03) && loaded.b[60] != KING) || ((loaded.castling & 0x0C) && loaded.b[4] != -KING) ||
+      ((loaded.castling & 0x01) && loaded.b[63] != ROOK) || ((loaded.castling & 0x02) && loaded.b[56] != ROOK) ||
+      ((loaded.castling & 0x04) && loaded.b[7] != -ROOK) || ((loaded.castling & 0x08) && loaded.b[0] != -ROOK)) {
+    LOG_ERR("CHESS", "Invalid session castling rights");
+    return false;
+  }
+  if (loaded.ep >= 0) {
+    const int row = loaded.whiteTurn ? 2 : 5;
+    const int pawnSquare = loaded.ep + (loaded.whiteTurn ? 8 : -8);
+    const int originSquare = loaded.ep + (loaded.whiteTurn ? -8 : 8);
+    if (loaded.ep / 8 != row || loaded.b[loaded.ep] != EMPTY ||
+        loaded.b[pawnSquare] != (loaded.whiteTurn ? -PAWN : PAWN) || loaded.b[originSquare] != EMPTY) {
+      LOG_ERR("CHESS", "Invalid session en passant square");
+      return false;
+    }
+  }
+  if (inCheck(loaded, !loaded.whiteTurn)) {
+    LOG_ERR("CHESS", "Invalid session previous player in check");
+    return false;
+  }
+  pos = loaded;
+  selected = -1;
+  targets.clear();
+  promoCount = 0;
+  promoSel = 0;
+  cursorRow = pos.whiteTurn ? 6 : 1;
+  cursorCol = 4;
+  confirmRestart = false;
+  backLongHandled = false;
+  aiPending = false;
+  gameOver = false;
+  statusOverride = nullptr;
+  computeLegalMoves();
+  updateStatusAfterMove();
+  sessionDirty = false;
+  return true;
+}
+
+bool ChessActivity::saveSession() {
+  if (!sessionDirty) return true;
+  uint8_t data[SESSION_SIZE];
+  data[0] = SESSION_VERSION;
+  for (int i = 0; i < 64; ++i) data[i + 1] = static_cast<uint8_t>(pos.b[i]);
+  data[65] = pos.whiteTurn ? 1 : 0;
+  data[66] = pos.castling;
+  data[67] = static_cast<uint8_t>(pos.ep + 1);
+  if (!GameSession::save(GameSession::Game::Chess, vsAi, data, sizeof(data))) return false;
+  sessionDirty = false;
+  return true;
 }
 
 void ChessActivity::reset() {
@@ -122,6 +228,9 @@ void ChessActivity::reset() {
   aiPending = false;
   promoCount = 0;
   promoSel = 0;
+  confirmRestart = false;
+  backLongHandled = false;
+  sessionDirty = true;
   computeLegalMoves();
   targets.clear();
 }
@@ -237,17 +346,29 @@ void ChessActivity::applyMove(Position& p, const Move& m) {
 
   // Castling: move the rook too
   if (pieceOf(piece) == KING) {
-    if (m.from == 60 && m.to == 62) { p.b[61] = p.b[63]; p.b[63] = EMPTY; }
-    if (m.from == 60 && m.to == 58) { p.b[59] = p.b[56]; p.b[56] = EMPTY; }
-    if (m.from == 4 && m.to == 6)   { p.b[5] = p.b[7];   p.b[7] = EMPTY; }
-    if (m.from == 4 && m.to == 2)   { p.b[3] = p.b[0];   p.b[0] = EMPTY; }
+    if (m.from == 60 && m.to == 62) {
+      p.b[61] = p.b[63];
+      p.b[63] = EMPTY;
+    }
+    if (m.from == 60 && m.to == 58) {
+      p.b[59] = p.b[56];
+      p.b[56] = EMPTY;
+    }
+    if (m.from == 4 && m.to == 6) {
+      p.b[5] = p.b[7];
+      p.b[7] = EMPTY;
+    }
+    if (m.from == 4 && m.to == 2) {
+      p.b[3] = p.b[0];
+      p.b[0] = EMPTY;
+    }
     p.castling &= white ? 0x0C : 0x03;
   }
   // Rook moves or is captured: drop the matching right
   if (m.from == 63 || m.to == 63) p.castling &= ~0x01;
   if (m.from == 56 || m.to == 56) p.castling &= ~0x02;
-  if (m.from == 7 || m.to == 7)   p.castling &= ~0x04;
-  if (m.from == 0 || m.to == 0)   p.castling &= ~0x08;
+  if (m.from == 7 || m.to == 7) p.castling &= ~0x04;
+  if (m.from == 0 || m.to == 0) p.castling &= ~0x08;
 
   p.whiteTurn = !p.whiteTurn;
 }
@@ -310,11 +431,13 @@ void ChessActivity::playMove(const Move& m) {
   selected = -1;
   targets.clear();
   promoCount = 0;
+  sessionDirty = true;
   computeLegalMoves();
   updateStatusAfterMove();
 }
 
 void ChessActivity::updateStatusAfterMove() {
+  aiPending = false;
   if (legalMoves.empty()) {
     gameOver = true;
     if (inCheck(pos, pos.whiteTurn)) {
@@ -500,109 +623,141 @@ int ChessActivity::squareFromTouch(const int x, const int y) const {
 }
 
 void ChessActivity::loop() {
-  if (aiPending) {
-    // One loop pass after the render that announced the AI turn.
-    runAi();
-    return;
-  }
+  {
+    RenderLock lock(*this);
+    [this] {
+      const bool backReleased = mappedInput.wasReleased(MappedInputManager::Button::Back);
+      if (backLongHandled && backReleased) {
+        backLongHandled = false;
+        return;
+      }
+      if (backLongHandled && !mappedInput.isPressed(MappedInputManager::Button::Back) && !backReleased) {
+        backLongHandled = false;
+      }
+      if (!confirmRestart && mappedInput.wasLongPressed(MappedInputManager::Button::Back, RESTART_HOLD_MS)) {
+        backLongHandled = true;
+        confirmRestart = true;
+        requestUpdate();
+        return;
+      }
+      int tx = 0, ty = 0;
+      const bool tapped = mappedInput.wasScreenTapped(tx, ty);
+      if (confirmRestart) {
+        const int width = renderer.getScreenWidth();
+        const int height = renderer.getScreenHeight();
+        const bool dialogTap = tapped && tx >= 24 && tx < width - 24 && ty >= height / 2 + 8 && ty < height / 2 + 48;
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || (dialogTap && tx >= width / 2)) {
+          reset();
+          requestUpdate();
+        } else if (backReleased || (dialogTap && tx < width / 2)) {
+          confirmRestart = false;
+          requestUpdate();
+        }
+        return;
+      }
+      if (tapped && tx >= restartX && tx < restartX + restartW && ty >= restartY && ty < restartY + restartH) {
+        confirmRestart = true;
+        requestUpdate();
+        return;
+      }
+      if (aiPending) {
+        if (backReleased) {
+          finish();
+          return;
+        }
+        runAi();
+        return;
+      }
 
-  // Promotion picker swallows all input while open.
-  if (promoCount > 0) {
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
-      if (promoSel > 0) promoSel--;
-      requestUpdate();
-    });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
-      if (promoSel < promoCount - 1) promoSel++;
-      requestUpdate();
-    });
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      promoCount = 0;
-      selected = -1;
-      targets.clear();
-      requestUpdate();
-      return;
-    }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      playMove(promoCands[promoSel]);
-      requestUpdate();
-      return;
-    }
-    int tx = 0, ty = 0;
-    if (mappedInput.wasScreenTapped(tx, ty)) {
-      if (tx >= promoBoxX && tx < promoBoxX + promoBoxW && ty >= promoBoxY && ty < promoBoxY + promoBoxH) {
-        const int idx = (tx - promoBoxX) / (promoBoxW / 4);
-        if (idx >= 0 && idx < promoCount) {
-          playMove(promoCands[idx]);
+      // Promotion picker swallows all input while open.
+      if (promoCount > 0) {
+        buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
+          if (promoSel > 0) promoSel--;
+          requestUpdate();
+        });
+        buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
+          if (promoSel < promoCount - 1) promoSel++;
+          requestUpdate();
+        });
+        if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+          promoCount = 0;
+          selected = -1;
+          targets.clear();
           requestUpdate();
           return;
         }
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+          playMove(promoCands[promoSel]);
+          requestUpdate();
+          return;
+        }
+        if (tapped) {
+          if (tx >= promoBoxX && tx < promoBoxX + promoBoxW && ty >= promoBoxY && ty < promoBoxY + promoBoxH) {
+            const int idx = (tx - promoBoxX) / (promoBoxW / 4);
+            if (idx >= 0 && idx < promoCount) {
+              playMove(promoCands[idx]);
+              requestUpdate();
+              return;
+            }
+          }
+          // Tap outside the picker cancels it.
+          promoCount = 0;
+          selected = -1;
+          targets.clear();
+          requestUpdate();
+        }
+        return;
       }
-      // Tap outside the picker cancels it.
-      promoCount = 0;
-      selected = -1;
-      targets.clear();
-      requestUpdate();
-    }
-    return;
-  }
 
-  buttonNavigator.onPressAndContinuous(
-      {MappedInputManager::Button::ScreenLeft}, [this] {
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenLeft}, [this] {
         if (cursorCol > 0) cursorCol--;
         requestUpdate();
       });
-  buttonNavigator.onPressAndContinuous(
-      {MappedInputManager::Button::ScreenRight}, [this] {
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenRight}, [this] {
         if (cursorCol < 7) cursorCol++;
         requestUpdate();
       });
-  buttonNavigator.onPressAndContinuous(
-      {MappedInputManager::Button::ScreenUp}, [this] {
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenUp}, [this] {
         if (cursorRow > 0) cursorRow--;
         requestUpdate();
       });
-  buttonNavigator.onPressAndContinuous(
-      {MappedInputManager::Button::ScreenDown}, [this] {
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::ScreenDown}, [this] {
         if (cursorRow < 7) cursorRow++;
         requestUpdate();
       });
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    if (selected >= 0) {
-      selected = -1;
-      targets.clear();
-      requestUpdate();
-    } else {
-      finish();
-    }
-    return;
-  }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        if (selected >= 0) {
+          selected = -1;
+          targets.clear();
+          requestUpdate();
+        } else {
+          finish();
+        }
+        return;
+      }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
-    } else {
-      handleSquareChosen(cursorRow * 8 + cursorCol);
-    }
-    return;
-  }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        if (gameOver) {
+          confirmRestart = true;
+          requestUpdate();
+        } else {
+          handleSquareChosen(cursorRow * 8 + cursorCol);
+        }
+        return;
+      }
 
-  int tx = 0, ty = 0;
-  if (mappedInput.wasScreenTapped(tx, ty)) {
-    if (gameOver) {
-      reset();
-      requestUpdate();
-      return;
-    }
-    const int sq = squareFromTouch(tx, ty);
-    if (sq >= 0) {
-      cursorRow = sq / 8;
-      cursorCol = sq % 8;
-      handleSquareChosen(sq);
-    }
+      if (tapped && !gameOver) {
+        const int sq = squareFromTouch(tx, ty);
+        if (sq >= 0) {
+          cursorRow = sq / 8;
+          cursorCol = sq % 8;
+          handleSquareChosen(sq);
+        }
+      }
+    }();
   }
+  saveSession();
 }
 
 // ---------------------------------------------------------------------------
@@ -625,7 +780,7 @@ void ChessActivity::renderPromotionOverlay() {
   renderer.drawRoundedRect(promoBoxX, promoBoxY, promoBoxW, promoBoxH, 2, 8, Black);
 
   const bool white = pos.whiteTurn;
-  static const int ORDER[4] = {QUEEN, KNIGHT, ROOK, BISHOP};
+  static constexpr int ORDER[4] = {QUEEN, KNIGHT, ROOK, BISHOP};
   for (int i = 0; i < promoCount; i++) {
     const int cx = promoBoxX + 8 + i * cell;
     const int cy = promoBoxY + 8;
@@ -663,9 +818,16 @@ void ChessActivity::render(RenderLock&&) {
   }
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, status);
 
+  restartW = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_NEW_GAME)) + 24;
+  restartH = renderer.getTextHeight(UI_10_FONT_ID) + 12;
+  restartX = (pageWidth - restartW) / 2;
+  restartY = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 4;
+  renderer.drawRoundedRect(restartX, restartY, restartW, restartH, 2, 4, Black);
+  renderer.drawCenteredText(UI_10_FONT_ID, restartY + 6, tr(STR_NEW_GAME));
+
   // Board geometry: square board centered, below the status line.
-  const int top = statusY + renderer.getTextHeight(UI_10_FONT_ID) + 12;
-  const int bottomReserve = metrics.buttonHintsHeight + 8;
+  const int top = restartY + restartH + 8;
+  const int bottomReserve = metrics.buttonHintsHeight + renderer.getTextHeight(UI_10_FONT_ID) + 12;
   const int availH = pageHeight - top - bottomReserve;
   const int availW = pageWidth - 24;
   squareSize = (availW < availH ? availW : availH) / 8;
@@ -708,7 +870,24 @@ void ChessActivity::render(RenderLock&&) {
 
   if (promoCount > 0) renderPromotionOverlay();
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT), "", "");
+  renderer.drawCenteredText(UI_10_FONT_ID,
+                            pageHeight - metrics.buttonHintsHeight - renderer.getTextHeight(UI_10_FONT_ID) - 4,
+                            tr(STR_GAME_NEW_GAME_HINT));
+  if (confirmRestart) {
+    const int y = pageHeight / 2 - 56;
+    renderer.fillRoundedRect(16, y, pageWidth - 32, 112, 8, White);
+    renderer.drawRoundedRect(16, y, pageWidth - 32, 112, 3, 8, Black);
+    renderer.drawCenteredText(UI_10_FONT_ID, y + 20, tr(STR_NEW_GAME));
+    renderer.drawRect(24, y + 64, pageWidth / 2 - 24, 40, 2, true);
+    renderer.drawRect(pageWidth / 2, y + 64, pageWidth / 2 - 24, 40, 2, true);
+    renderer.drawText(UI_10_FONT_ID, pageWidth / 4 - renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CANCEL)) / 2, y + 74,
+                      tr(STR_CANCEL));
+    renderer.drawText(UI_10_FONT_ID, 3 * pageWidth / 4 - renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CONFIRM)) / 2,
+                      y + 74, tr(STR_CONFIRM));
+  }
+  const auto labels =
+      mappedInput.mapLabels(confirmRestart ? tr(STR_CANCEL) : tr(STR_BACK),
+                            confirmRestart ? tr(STR_CONFIRM) : (gameOver ? tr(STR_NEW_GAME) : tr(STR_SELECT)), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   // Periodic half refresh to clear e-ink ghosting.

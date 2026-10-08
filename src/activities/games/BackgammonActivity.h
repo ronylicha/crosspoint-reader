@@ -16,6 +16,8 @@ class BackgammonActivity final : public Activity {
       : Activity("Backgammon", renderer, mappedInput), vsAi(vsAi) {}
 
   void onEnter() override;
+  void onExit() override;
+  void prepareForSleep() override;
   void loop() override;
   void render(RenderLock&&) override;
 
@@ -46,12 +48,20 @@ class BackgammonActivity final : public Activity {
   int diceCount = 0;        // entries in diceLeft
   uint8_t diceRolled[4]{};  // full roll as thrown (for display), used dice greyed out
   int diceRolledCount = 0;
-  int selected = -1;      // selected source 0..23 or SRC_BAR, -1 = none
-  int cursorPoint = 12;   // button-navigation cursor (0..23, or SRC_BAR)
+  int selected = -1;     // selected source 0..23 or SRC_BAR, -1 = none
+  int cursorPoint = 12;  // button-navigation cursor (0..23, or SRC_BAR)
   bool gameOver = false;
   bool whiteWon = false;
   const char* statusOverride = nullptr;
   bool aiPending = false;
+  bool aiPlaying = false;
+  Step aiSteps[4]{};
+  uint8_t aiStepCount = 0;
+  uint8_t aiStepIndex = 0;
+  uint32_t aiNextStepAt = 0;
+  bool confirmRestart = false;
+  bool backLongHandled = false;
+  bool sessionDirty = true;
   int renderCount = 0;
   bool vsAi;
 
@@ -64,10 +74,16 @@ class BackgammonActivity final : public Activity {
   int barW = 0;
   int diceZoneY = 0;
   int diceZoneH = 0;
+  int restartX = 0;
+  int restartY = 0;
+  int restartW = 0;
+  int restartH = 0;
 
   ButtonNavigator buttonNavigator;
 
   void reset();
+  bool loadSession();
+  bool saveSession();
 
   // --- Rules ----------------------------------------------------------------
   static bool canBearOff(const State& s, bool white);
@@ -80,8 +96,7 @@ class BackgammonActivity final : public Activity {
   // First steps that are fully legal: only moves belonging to a sequence that
   // uses the maximum number of dice; when only one die of a mixed roll can be
   // played, the higher one is forced.
-  static void legalFirstSteps(const State& s, bool white, const uint8_t* dice, int count,
-                              std::vector<Step>& out);
+  static void legalFirstSteps(const State& s, bool white, const uint8_t* dice, int count, std::vector<Step>& out);
 
   // --- Flow -----------------------------------------------------------------
   void rollDice();
@@ -89,13 +104,21 @@ class BackgammonActivity final : public Activity {
   bool anyStepAvailable() const;
   void endTurn();
   void handlePointChosen(int point);  // point 0..23 or SRC_BAR
+  bool findSequence(int source, int destination, Step out[4], int& count) const;
+  static bool findSequenceFrom(const State& s, bool white, const uint8_t* dice, int count, int source, int destination,
+                               Step out[4], int& outCount, int depth);
   // --- AI -------------------------------------------------------------------
   void runAi();
+  void advanceAi();
   struct AiCtx {
     int nodes = 0;
-    std::vector<State> results;
+    int bestScore = 0;
+    bool hasBest = false;
+    Step path[4]{};
+    Step bestSteps[4]{};
+    uint8_t bestCount = 0;
   };
-  static void dfsSequences(const State& s, bool white, const uint8_t* dice, int count, AiCtx& ctx);
+  static void dfsSequences(const State& s, bool white, const uint8_t* dice, int count, AiCtx& ctx, int depth = 0);
   static int evaluate(const State& s);
 
   // --- Input / render helpers ------------------------------------------------
