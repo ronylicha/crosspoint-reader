@@ -463,7 +463,9 @@ void CheckersActivity::drawPiece(const int piece, const int x, const int y, cons
   const bool white = piece > 0;
 
   renderer.fillRoundedRect(tx, ty, ts, ts, ts / 2, white ? White : Black);
-  renderer.drawRoundedRect(tx, ty, ts, ts, 2, ts / 2, !white);
+  // Contrasting outline: black rim on white tokens, white rim on black tokens.
+  renderer.drawRoundedRect(tx, ty, ts, ts, 2, ts / 2, white ? Black : White);
+  renderer.drawRoundedRect(tx + 2, ty + 2, ts - 4, ts - 4, 1, (ts - 4) / 2, white ? Black : White);
   if (isKing(piece)) {
     // Crown marker in the opposite color.
     const int inset = ts / 5;
