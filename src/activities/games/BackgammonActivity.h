@@ -42,8 +42,10 @@ class BackgammonActivity final : public Activity {
   State st;
   bool whiteTurn = true;
   Phase phase = ROLL;
-  uint8_t diceLeft[4]{};  // remaining dice values (1..6), up to 4 for doubles
-  int diceCount = 0;      // entries in diceLeft
+  uint8_t diceLeft[4]{};    // remaining dice values (1..6), up to 4 for doubles
+  int diceCount = 0;        // entries in diceLeft
+  uint8_t diceRolled[4]{};  // full roll as thrown (for display), used dice greyed out
+  int diceRolledCount = 0;
   int selected = -1;      // selected source 0..23 or SRC_BAR, -1 = none
   int cursorPoint = 12;   // button-navigation cursor (0..23, or SRC_BAR)
   bool gameOver = false;
@@ -73,9 +75,13 @@ class BackgammonActivity final : public Activity {
   static void genSteps(const State& s, bool white, uint8_t die, std::vector<Step>& out);
   static void applyStep(State& s, bool white, const Step& m);
   static int pipCount(const State& s, bool white);
-  // Dice values (from diceLeft) that have at least one legal step; applies the
-  // "higher die first when only one is playable" rule.
-  void playableDice(bool outMask[7]) const;
+  // Max number of dice usable from this position with this roll (0..count).
+  static int maxUsable(const State& s, bool white, const uint8_t* dice, int count);
+  // First steps that are fully legal: only moves belonging to a sequence that
+  // uses the maximum number of dice; when only one die of a mixed roll can be
+  // played, the higher one is forced.
+  static void legalFirstSteps(const State& s, bool white, const uint8_t* dice, int count,
+                              std::vector<Step>& out);
 
   // --- Flow -----------------------------------------------------------------
   void rollDice();
