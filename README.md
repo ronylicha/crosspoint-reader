@@ -1,6 +1,6 @@
 # CrossPoint Reader + Jeux — fork Xteink X4 Pro
 
-> Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) qui ajoute un **menu Jeux** avec **Échecs** et **Dames** (chacun en 2 joueurs ou contre l'IA), dédié au **Xteink X4 Pro** (ESP32-S3, écran tactile).
+> Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) qui ajoute un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon** (chacun en 2 joueurs ou contre l'IA), dédié au **Xteink X4 Pro** (ESP32-S3, écran tactile).
 
 **Version actuelle : 1.6.5-games.1** — basée sur CrossPoint Reader officiel **1.6.5**.
 
@@ -43,6 +43,10 @@ Tout le firmware CrossPoint 1.6.5 officiel, **plus** :
   - Prise obligatoire avec **règle de la prise majoritaire**.
   - Rafles (prises en chaîne), dames volantes, promotion en dame marquée d'une **couronne**.
   - IA renforcée : recherche alpha-bêta (profondeur 6) avec évaluation positionnelle.
+- **Backgammon** :
+  - Mode 2 joueurs ou contre l'IA.
+  - Règles complètes : doublets, barre, rentrée obligatoire, sortie des pions.
+  - IA : énumération des séquences légales du jet et évaluation positionnelle.
 - **Interface tactile** adaptée au X4 Pro : touchez une pièce puis sa destination, ou utilisez les boutons (curseur + Confirmer). Bouton Retour pour désélectionner / quitter.
 - **Traductions** française et anglaise de toute l'interface des jeux.
 
