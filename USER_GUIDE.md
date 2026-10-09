@@ -124,7 +124,7 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's local shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. This source change does not announce a new downloadable release; checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. It is included in the updated [X4 Pro firmware asset for v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), built from [source commit `566517c7`](https://github.com/ronylicha/crosspoint-reader/commit/566517c790756dd1ca269d0f5459a6a86788e23a). Checks on the reader remain necessary.
 
 Three tabs select the order of the books. The arrow beside the active tab shows the sort direction:
 
@@ -147,7 +147,7 @@ The details popup shows the available title, author, filename, location on the S
 
 Cover thumbnails are cached on the SD card and prepared one at a time. A book without a usable cover keeps a placeholder and remains accessible. The index is created automatically the first time the Library is opened. After adding, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
 
-The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with 514 tests; the 19 library tests also pass under ASan/UBSan without diagnostics, and the final X4 Pro firmware compiles successfully. The local binary is `build/library-x4pro/firmware-x4pro-bibliotheque.bin`; it has not been published in a release. These checks do not establish how twelve covers or long detail pages look on the reader's E-Ink screen.
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with 514 tests; the 19 library tests also pass under ASan/UBSan without diagnostics, and the final X4 Pro firmware compiles successfully. The published [firmware asset](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) was downloaded from its public URL and matches the local build exactly: 5,876,768 bytes, SHA-256 `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`. The existing release version is unchanged. These checks do not establish how twelve covers or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 

@@ -1,6 +1,6 @@
 # Bibliothèque : couvertures sur étagères
 
-Cette refonte est disponible dans les sources locales. Elle n'annonce pas une nouvelle release téléchargeable. Les essais sur liseuse restent à effectuer.
+Cette refonte est incluse dans le [firmware X4 Pro de v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3), dont l'asset `firmware-x4pro-jeux.bin` a été mis à jour sans changer de version. Les sources correspondent au [commit `566517c7`](https://github.com/ronylicha/crosspoint-reader/commit/566517c790756dd1ca269d0f5459a6a86788e23a). Les essais sur liseuse restent à effectuer.
 
 La bibliothèque affiche les livres sous forme de couvertures posées sur trois étagères. Chaque page contient jusqu'à **12 livres : quatre colonnes et trois rangées**. Les emplacements restants restent vides sur la dernière page. Un cadre indique le livre sélectionné.
 
@@ -59,7 +59,9 @@ Après avoir ajouté, renommé ou déplacé des livres sur la carte SD, utilisez
 
 La suite complète passe avec **514 tests hôte**, dont **19 tests ciblés de la bibliothèque**. Ces 19 tests passent aussi sous ASan/UBSan sans diagnostic. La revue des chemins de grille, cache, navigation et fiche n'a relevé aucun problème après correction du rendu des dialogues. La compilation finale du firmware **X4 Pro réussit** ; aucun résultat matériel n'est acquis.
 
-Le binaire est disponible localement dans `build/library-x4pro/firmware-x4pro-bibliotheque.bin` : **5 876 768 octets**. Son SHA-256 est `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`. L'image ESP32-S3 passe les vérifications de checksum et de hash internes d'esptool. Ce binaire n'a pas été publié dans une release.
+Téléchargez le [firmware X4 Pro avec bibliothèque sur étagères](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) : **5 876 768 octets**. Son SHA-256 est `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`. Le téléchargement depuis l'URL publique a été comparé au build local : les fichiers sont identiques et le digest GitHub correspond. L'image ESP32-S3 passe les vérifications de checksum et de hash internes d'esptool.
+
+La release conserve son tag historique ; ses notes indiquent le commit source du binaire actualisé. Pour l'installation, suivez les [instructions du README](../README.md#installation).
 
 Les essais suivants vérifient le rendu E-Ink et les commandes sur l'appareil :
 
