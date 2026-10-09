@@ -10,6 +10,7 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -38,6 +39,9 @@ constexpr size_t NAME_BUF_SIZE = 512;
 // the display name. Fixed stride keeps the second pass a seek rather than a scan.
 constexpr size_t STAGE_NAME_BYTES = 255;
 constexpr size_t STAGE_AUTHOR_BYTES = 128;
+constexpr size_t STAGE_SERIES_BYTES = 255;
+// fold() replaces UTF-8 characters with equal or shorter byte sequences.
+constexpr size_t STAGE_SERIES_FOLD_BYTES = STAGE_SERIES_BYTES;
 // A folder path is stored behind one length byte in the folder section.
 constexpr size_t FOLDER_PATH_BYTES = 255;
 struct StagedEntry {
@@ -55,6 +59,12 @@ struct StagedEntry {
   // title on the other.
   uint8_t titleLen;
   char title[STAGE_NAME_BYTES];
+  uint8_t seriesLen;
+  char series[STAGE_SERIES_BYTES];
+  float seriesIndex;
+  uint8_t hasSeriesIndex;
+  uint16_t seriesFoldLen;
+  char seriesFold[STAGE_SERIES_FOLD_BYTES];
 };
 constexpr size_t STAGE_STRIDE = sizeof(StagedEntry);
 
@@ -105,7 +115,7 @@ bool recoverInterruptedInstall() {
   // before backup cleanup. Validate them one at a time (SdFat has one reader)
   // before deciding which copy is stale.
   LibraryIndexFile candidate;
-  if (candidate.open(INDEX_PATH)) {
+  if (candidate.openForReconciliation(INDEX_PATH)) {
     candidate.close();
     if (Storage.remove(BACKUP_PATH)) return true;
     LOG_ERR("LIBIDX", "cannot remove stale backup; rebuild deferred");
@@ -117,7 +127,7 @@ bool recoverInterruptedInstall() {
   }
   candidate.close();
 
-  if (candidate.open(BACKUP_PATH)) {
+  if (candidate.openForReconciliation(BACKUP_PATH)) {
     candidate.close();
     if (!Storage.remove(INDEX_PATH) || !Storage.rename(BACKUP_PATH, INDEX_PATH)) {
       LOG_ERR("LIBIDX", "validated backup could not replace an invalid live index");
@@ -299,6 +309,8 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
   // and a name pulled out of one by pattern is a guess wearing a fact's clothes.
   std::string title = stemOf(name);
   std::string author;
+  std::string series;
+  std::optional<float> seriesIndex;
   bool titleFromBook = false;
   bool authorFromBook = false;
 
@@ -308,20 +320,22 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
   const bool extractionExpected = st.readMetadata && FsHelpers::hasEpubExtension(name);
   const uint8_t expectedStatus = extractionExpected ? CLIX_METADATA_EXTRACTED : CLIX_METADATA_NOT_ATTEMPTED;
   bool reuseMetadata = false;
-  ClixRecord priorRecord{};
+  ClixRecord& priorRecord = entry.record;
   if (priorIndex >= 0) {
     if (!st.previous->readRecord(priorOrdinal(st.prior[priorIndex]), priorRecord)) {
       st.failed = true;
       return false;
     }
     reuseMetadata =
-        st.prior[priorIndex].fileSize == fileSize && modificationTime != 0 &&
-        priorRecord.modificationTime == modificationTime && st.previous->header().foldVersion == CLIX_FOLD_VERSION &&
+        st.previous->header().formatVersion == CLIX_FORMAT_VERSION && st.prior[priorIndex].fileSize == fileSize &&
+        modificationTime != 0 && priorRecord.modificationTime == modificationTime &&
+        st.previous->header().foldVersion == CLIX_FOLD_VERSION &&
         st.previous->header().metadataEnabled == st.readMetadata && priorRecord.metadataStatus == expectedStatus;
   }
 
   if (reuseMetadata) {
-    if (!st.previous->readSourceAuthor(priorRecord, author)) {
+    if (!st.previous->readSourceAuthor(priorRecord, author) || !st.previous->readSeries(priorRecord, series) ||
+        !st.previous->readSeriesIndex(priorRecord, seriesIndex)) {
       st.failed = true;
       return false;
     }
@@ -330,7 +344,6 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
       st.failed = true;
       return false;
     }
-    entry.record = priorRecord;
     authorFromBook = !author.empty();
     if (hasBookTitle) {
       titleFromBook = true;
@@ -338,21 +351,30 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
       title = stemOf(name);
     }
     st.stats->metadataReused++;
+  } else {
+    memset(&entry.record, 0, sizeof(entry.record));
   }
 
-  // Prefer the reader's existing cache. For an unopened book, loadMetadata()
-  // reuses the same EPUB parser but stops before the manifest, so this never
-  // builds spine, TOC, CSS, cover, or section caches during the library walk.
+  // Read all library metadata in one OPF pass; the reading cache has no series.
   if (!reuseMetadata && extractionExpected) {
     st.stats->parsed++;
-    Epub epub(fullPath, CACHE_DIR);
-    std::string bookTitle;
-    if (epub.loadMetadata(bookTitle, author)) {
+    // Parser owners exceed the small task stack budget and live for one book.
+    auto epub = makeUniqueNoThrow<Epub>(fullPath, CACHE_DIR);
+    auto metadata = makeUniqueNoThrow<Epub::SyncMetadata>();
+    if (!epub || !metadata) {
+      LOG_ERR("LIBIDX", "OOM: EPUB library metadata");
+      st.failed = true;
+      return false;
+    }
+    if (epub->loadSyncMetadata(*metadata)) {
       entry.record.metadataStatus = CLIX_METADATA_EXTRACTED;
-      if (!bookTitle.empty()) {
-        title = std::move(bookTitle);
+      if (!metadata->title.empty()) {
+        title = std::move(metadata->title);
         titleFromBook = true;
       }
+      author = std::move(metadata->author);
+      series = std::move(metadata->series);
+      seriesIndex = metadata->seriesIndex;
       authorFromBook = !author.empty();
     } else {
       entry.record.metadataStatus = CLIX_METADATA_FAILED;
@@ -412,6 +434,26 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
   const std::string displayAuthor = cleanPersonName(author);
   entry.authorLen = static_cast<uint8_t>(std::min(displayAuthor.size(), STAGE_AUTHOR_BYTES));
   memcpy(entry.author, displayAuthor.data(), entry.authorLen);
+
+  series = utf8ComposeNfc(series);
+  const size_t seriesBytes = std::min(series.size(), STAGE_SERIES_BYTES);
+  series.resize(static_cast<size_t>(utf8SafeTruncateBuffer(series.data(), static_cast<int>(seriesBytes))));
+  const std::string seriesKey = fold(series);
+  if (seriesKey.size() > STAGE_SERIES_FOLD_BYTES) {
+    LOG_ERR("LIBIDX", "series fold exceeds staging bound");
+    st.failed = true;
+    return false;
+  }
+  if (!seriesKey.empty()) {
+    entry.seriesLen = static_cast<uint8_t>(series.size());
+    memcpy(entry.series, series.data(), entry.seriesLen);
+    entry.seriesFoldLen = static_cast<uint16_t>(seriesKey.size());
+    memcpy(entry.seriesFold, seriesKey.data(), entry.seriesFoldLen);
+    if (seriesIndex && std::isfinite(*seriesIndex)) {
+      entry.hasSeriesIndex = 1;
+      entry.seriesIndex = *seriesIndex;
+    }
+  }
 
   st.stageOut->write(&entry, STAGE_STRIDE);
   st.books++;
@@ -550,8 +592,129 @@ void walk(WalkState& st, const std::string& path, const int depth) {
 // truth.
 uint32_t blobBytesFor(const StagedEntry& entry, const StagedEntry& canonical) {
   return sizeof(entry.pathHash) + entry.record.nameLen + 1u + canonical.authorLen + 1u + entry.titleLen + 1u +
-         entry.authorLen;
+         entry.authorLen + 1u + entry.seriesLen + 1u + (entry.hasSeriesIndex ? sizeof(float) : 0u);
 }
+
+int compareBytes(const char* left, const uint16_t leftLen, const char* right, const uint16_t rightLen) {
+  const int compared = memcmp(left, right, std::min(leftLen, rightLen));
+  if (compared != 0) return compared;
+  return leftLen < rightLen ? -1 : leftLen > rightLen ? 1 : 0;
+}
+
+// Two reusable staging buffers keep full series keys on SD, even at 4096 books.
+// The checked heap sort can stop immediately on I/O failure; its comparator
+// never changes ordering rules after a failed read.
+class SeriesSorter {
+ public:
+  SeriesSorter(HalFile& stage, const uint16_t* recordOrder, StagedEntry* scratch, uint32_t& workUnits)
+      : stage(stage), recordOrder(recordOrder), scratch(scratch), workUnits(workUnits) {}
+
+  bool sort(uint16_t* ordinals, const uint16_t count) {
+    for (uint16_t i = 0; i < count; ++i) ordinals[i] = i;
+    for (uint16_t root = count / 2; root > 0; --root) {
+      if (!sift(ordinals, static_cast<uint16_t>(root - 1), count)) return false;
+    }
+    for (uint16_t end = count; end > 1; --end) {
+      std::swap(ordinals[0], ordinals[end - 1]);
+      if (!sift(ordinals, 0, static_cast<uint16_t>(end - 1))) return false;
+    }
+    return true;
+  }
+
+  bool sameSeries(const uint16_t left, const uint16_t right, bool& same) {
+    int leftSlot = 0;
+    int rightSlot = 0;
+    if (!loadPair(left, right, leftSlot, rightSlot)) return false;
+    const auto& a = scratch[leftSlot];
+    const auto& b = scratch[rightSlot];
+    same = compareBytes(a.seriesFold, a.seriesFoldLen, b.seriesFold, b.seriesFoldLen) == 0;
+    return true;
+  }
+
+ private:
+  bool load(const uint16_t ordinal, const int slot) {
+    serviceBuilder(workUnits);
+    const uint64_t offset = static_cast<uint64_t>(recordOrder[ordinal]) * STAGE_STRIDE;
+    if (!stage.seekSet(offset) ||
+        stage.read(reinterpret_cast<uint8_t*>(&scratch[slot]), STAGE_STRIDE) != static_cast<int>(STAGE_STRIDE)) {
+      LOG_ERR("LIBIDX", "series sort: stage read failed at %u", static_cast<unsigned>(offset));
+      return false;
+    }
+    const auto& entry = scratch[slot];
+    if (entry.seriesFoldLen > STAGE_SERIES_FOLD_BYTES || entry.hasSeriesIndex > 1 ||
+        entry.record.foldLen > CLIX_FOLD_BYTES || (entry.hasSeriesIndex && !std::isfinite(entry.seriesIndex))) {
+      LOG_ERR("LIBIDX", "series sort: invalid staged metadata");
+      return false;
+    }
+    cached[slot] = ordinal;
+    return true;
+  }
+
+  bool loadPair(const uint16_t left, const uint16_t right, int& leftSlot, int& rightSlot) {
+    if (cached[0] == left)
+      leftSlot = 0;
+    else if (cached[1] == left)
+      leftSlot = 1;
+    else {
+      leftSlot = cached[0] == right ? 1 : 0;
+      if (!load(left, leftSlot)) return false;
+    }
+    if (left == right) {
+      rightSlot = leftSlot;
+    } else {
+      rightSlot = 1 - leftSlot;
+      if (cached[rightSlot] != right && !load(right, rightSlot)) return false;
+    }
+    return true;
+  }
+
+  bool compare(const uint16_t left, const uint16_t right, int& compared) {
+    int leftSlot = 0;
+    int rightSlot = 0;
+    if (!loadPair(left, right, leftSlot, rightSlot)) return false;
+    const auto& a = scratch[leftSlot];
+    const auto& b = scratch[rightSlot];
+    if ((a.seriesFoldLen == 0) != (b.seriesFoldLen == 0)) {
+      compared = a.seriesFoldLen == 0 ? 1 : -1;
+      return true;
+    }
+    compared = compareBytes(a.seriesFold, a.seriesFoldLen, b.seriesFold, b.seriesFoldLen);
+    if (compared != 0) return true;
+    if (a.hasSeriesIndex != b.hasSeriesIndex) {
+      compared = a.hasSeriesIndex ? -1 : 1;
+      return true;
+    }
+    if (a.hasSeriesIndex && a.seriesIndex != b.seriesIndex) {
+      compared = a.seriesIndex < b.seriesIndex ? -1 : 1;
+      return true;
+    }
+    compared = compareBytes(a.record.fold, a.record.foldLen, b.record.fold, b.record.foldLen);
+    if (compared == 0) compared = left < right ? -1 : left > right ? 1 : 0;
+    return true;
+  }
+
+  bool sift(uint16_t* ordinals, uint16_t root, const uint16_t count) {
+    while (static_cast<uint32_t>(root) * 2 + 1 < count) {
+      uint16_t child = static_cast<uint16_t>(root * 2 + 1);
+      int compared = 0;
+      if (child + 1 < count) {
+        if (!compare(ordinals[child], ordinals[child + 1], compared)) return false;
+        if (compared < 0) ++child;
+      }
+      if (!compare(ordinals[root], ordinals[child], compared)) return false;
+      if (compared >= 0) return true;
+      std::swap(ordinals[root], ordinals[child]);
+      root = child;
+    }
+    return true;
+  }
+
+  HalFile& stage;
+  const uint16_t* recordOrder;
+  StagedEntry* scratch;
+  uint32_t& workUnits;
+  uint16_t cached[2] = {0xFFFF, 0xFFFF};
+};
 
 bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order, const uint16_t* resolvedFirstSeen,
                const bool coreSortsAvailable, BuildStats& stats) {
@@ -572,6 +735,7 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
   header.folderCount = st.folderId;
   header.nextFirstSeen = st.nextFirstSeen;
   header.metadataEnabled = st.readMetadata;
+  header.seriesGroupCount = n > 0 ? 1 : 0;
   // Placeholder only. Degradations are known after the sorts have run.
   header.flags = 0;
   // The blob is the LAST section, so its size affects only selfSize — every
@@ -980,6 +1144,30 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
     const uint16_t ordinal = arrivalOrder[k];
     put(&ordinal, sizeof(ordinal));
   }
+  // Author keys are no longer needed. Reuse arrival ordinals for the series
+  // permutation instead of allocating another per-book resident array.
+  authorSort.reset();
+  spellingScratch.reset();
+  SeriesSorter seriesSorter(stage, order, staged.get(), serviceUnits);
+  if (!ioFailed && !seriesSorter.sort(arrivalOrder.get(), n)) ioFailed = true;
+  for (uint16_t k = 0; !ioFailed && k < n; ++k) {
+    serviceBuilder(serviceUnits);
+    put(&arrivalOrder[k], sizeof(uint16_t));
+  }
+  padTo(header.seriesGroupsStart);
+  header.seriesGroupCount = 0;
+  for (uint16_t k = 0; !ioFailed && k < n; ++k) {
+    bool same = false;
+    if (k > 0 && !seriesSorter.sameSeries(arrivalOrder[k - 1], arrivalOrder[k], same)) {
+      ioFailed = true;
+      break;
+    }
+    if (k == 0 || !same) {
+      put(&k, sizeof(k));
+      ++header.seriesGroupCount;
+    }
+  }
+  arrivalOrder.reset();
   padTo(header.nameStart);
 
   uint32_t blobWritten = 0;
@@ -997,6 +1185,10 @@ bool emitIndex(const char* folderStagePath, WalkState& st, const uint16_t* order
     if (entry.titleLen > 0) put(entry.title, entry.titleLen);
     put(&entry.authorLen, 1);
     if (entry.authorLen > 0) put(entry.author, entry.authorLen);
+    put(&entry.seriesLen, sizeof(entry.seriesLen));
+    if (entry.seriesLen > 0) put(entry.series, entry.seriesLen);
+    put(&entry.hasSeriesIndex, sizeof(entry.hasSeriesIndex));
+    if (entry.hasSeriesIndex) put(&entry.seriesIndex, sizeof(entry.seriesIndex));
     blobWritten += blobBytesFor(entry, canonical);
   }
   header.nameLen = blobWritten;
@@ -1180,8 +1372,10 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
   stats.unchanged = st.reused;
   stats.enriched = st.enriched;
 
-  if (previous.isOpen() && st.books == priorCount && st.reused == priorCount && stats.metadataReused == priorCount &&
-      st.unreadableSkipped == 0) {
+  if (previous.isOpen() && previous.header().formatVersion == CLIX_FORMAT_VERSION &&
+      previous.header().foldVersion == CLIX_FOLD_VERSION &&
+      previous.header().metadataEnabled == (readMetadata ? 1 : 0) && st.books == priorCount &&
+      st.reused == priorCount && stats.metadataReused == priorCount && st.unreadableSkipped == 0) {
     previous.close();
     Storage.remove(STAGE_PATH);
     Storage.remove(folderStagePath.c_str());

@@ -705,6 +705,7 @@ bool Epub::loadSyncMetadata(SyncMetadata& metadata) {
   const std::string basePath = contentOpfFilePath.substr(0, contentOpfFilePath.find_last_of('/') + 1);
   ContentOpfParser parser(cachePath, basePath, contentOpfSize, nullptr, true);
   if (!parser.setup()) {
+    LOG_ERR("EBP", "Could not allocate content.opf parser for sync metadata");
     zip.close();
     return false;
   }
@@ -713,6 +714,15 @@ bool Epub::loadSyncMetadata(SyncMetadata& metadata) {
   zip.close();
   if (!read) return false;
 
+  const auto takeNfcText = [](std::string& text) {
+    if (!text.empty()) {
+      utf8ComposeNfcInPlace(text.data());
+      text.resize(strlen(text.c_str()));
+    }
+    return std::move(text);
+  };
+  metadata.title = takeNfcText(parser.title);
+  metadata.author = takeNfcText(parser.author);
   metadata.isbn = std::move(parser.isbn);
   metadata.asin = std::move(parser.asin);
   metadata.series = std::move(parser.series);

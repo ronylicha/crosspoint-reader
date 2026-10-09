@@ -5,6 +5,7 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "LibraryText.h"
@@ -13,15 +14,24 @@ namespace library {
 
 LibraryIndexFile::~LibraryIndexFile() { close(); }
 
-bool LibraryIndexFile::open(const char* path) { return openImpl(path, false); }
+bool LibraryIndexFile::open(const char* path) { return openImpl(path, false, false); }
 
-bool LibraryIndexFile::openForReconciliation(const char* path) { return openImpl(path, true); }
+bool LibraryIndexFile::openForReconciliation(const char* path) { return openImpl(path, true, true); }
 
-bool LibraryIndexFile::openImpl(const char* path, const bool acceptStaleFold) {
+bool LibraryIndexFile::openImpl(const char* path, const bool acceptStaleFold, const bool acceptLegacy) {
   close();
   readFailed = false;
   if (!Storage.openFileForRead("LIBIDX", path, file)) {
     readFailed = true;
+    return false;
+  }
+
+  // A truncated cache is rebuildable; only a read failure against an
+  // announced complete header indicates unavailable storage.
+  const uint64_t fileSize = file.fileSize64();
+  if (fileSize < sizeof(head)) {
+    lastValidity = ClixValidity::SizeMismatch;
+    file.close();
     return false;
   }
 
@@ -32,8 +42,11 @@ bool LibraryIndexFile::openImpl(const char* path, const bool acceptStaleFold) {
     return false;
   }
 
-  lastValidity =
-      acceptStaleFold ? validateHeaderStructure(head, file.fileSize64()) : validateHeader(head, file.fileSize64());
+  if (acceptLegacy) {
+    lastValidity = validateHeaderStructureForReconciliation(head, fileSize);
+  } else {
+    lastValidity = acceptStaleFold ? validateHeaderStructure(head, fileSize) : validateHeader(head, fileSize);
+  }
   if (lastValidity != ClixValidity::Ok) {
     LOG_INF("LIBIDX", "index rejected: %s", clixValidityName(lastValidity));
     file.close();
@@ -77,6 +90,12 @@ uint16_t LibraryIndexFile::ordinalForRow(const SortOrder order, const uint16_t r
       uint16_t ordinal = NONE;
       return readAt(authorOrderOffset(head, k), &ordinal, sizeof(ordinal)) && ordinal < head.bookCount ? ordinal : NONE;
     }
+    case SortOrder::SeriesAsc: {
+      if (head.formatVersion != CLIX_FORMAT_VERSION) return NONE;
+      uint16_t ordinal = NONE;
+      return readAt(seriesOrderOffset(head, row), &ordinal, sizeof(ordinal)) && ordinal < head.bookCount ? ordinal
+                                                                                                         : NONE;
+    }
     case SortOrder::RecentAsc:
     case SortOrder::RecentDesc: {
       // arrivalOrder runs oldest first, so both directions share one on-disk
@@ -88,6 +107,30 @@ uint16_t LibraryIndexFile::ordinalForRow(const SortOrder order, const uint16_t r
     }
   }
   return NONE;
+}
+
+uint16_t LibraryIndexFile::seriesGroupStart(const uint16_t group) {
+  constexpr uint16_t NONE = 0xFFFF;
+  if (!opened || head.formatVersion != CLIX_FORMAT_VERSION || group > head.seriesGroupCount) return NONE;
+  if (group == head.seriesGroupCount) return head.bookCount;
+  uint16_t start = NONE;
+  if (!readAt(head.seriesGroupsStart + static_cast<uint32_t>(group) * sizeof(start), &start, sizeof(start)) ||
+      start >= head.bookCount || (group == 0 && start != 0))
+    return NONE;
+  if (group > 0) {
+    uint16_t previous = NONE;
+    if (!readAt(head.seriesGroupsStart + static_cast<uint32_t>(group - 1) * sizeof(previous), &previous,
+                sizeof(previous)) ||
+        previous >= start)
+      return NONE;
+  }
+  if (group + 1 < head.seriesGroupCount) {
+    uint16_t next = NONE;
+    if (!readAt(head.seriesGroupsStart + static_cast<uint32_t>(group + 1) * sizeof(next), &next, sizeof(next)) ||
+        next <= start || next >= head.bookCount)
+      return NONE;
+  }
+  return start;
 }
 
 bool LibraryIndexFile::recentRowsFor(const BookIdentity* books, const size_t count, uint16_t* outRows) {
@@ -194,27 +237,130 @@ bool LibraryIndexFile::readPathHash(const ClixRecord& record, uint64_t& out) {
   return readAt(head.nameStart + record.nameOff, &out, sizeof(out));
 }
 
+bool LibraryIndexFile::recordBlobBounds(const ClixRecord& record, uint32_t& start, uint32_t& end) {
+  start = 0;
+  end = 0;
+  if (!opened || head.formatVersion != CLIX_FORMAT_VERSION || record.nameOff >= head.nameLen) return false;
+  // v3 writers emit names in record order; binary search needs no resident
+  // offsets and reads at most log2(bookCount) fixed-width fields.
+  uint16_t low = 0;
+  uint16_t high = head.bookCount;
+  while (low < high) {
+    const uint16_t middle = static_cast<uint16_t>(low + (high - low) / 2);
+    uint32_t offset = 0;
+    if (!readAt(recordOffset(head, middle), &offset, sizeof(offset)) || offset >= head.nameLen) return false;
+    if (offset < record.nameOff)
+      low = static_cast<uint16_t>(middle + 1);
+    else
+      high = middle;
+  }
+  if (low >= head.bookCount) return false;
+  uint32_t matched = 0;
+  if (!readAt(recordOffset(head, low), &matched, sizeof(matched)) || matched != record.nameOff) return false;
+  uint32_t limit = head.nameLen;
+  if (low + 1 < head.bookCount && !readAt(recordOffset(head, static_cast<uint16_t>(low + 1)), &limit, sizeof(limit)))
+    return false;
+  if (limit <= matched || limit > head.nameLen) return false;
+  if (low > 0) {
+    uint32_t previous = 0;
+    if (!readAt(recordOffset(head, static_cast<uint16_t>(low - 1)), &previous, sizeof(previous)) || previous >= matched)
+      return false;
+  }
+  start = matched;
+  end = limit;
+  return true;
+}
+
 bool LibraryIndexFile::readBlobField(const ClixRecord& record, const uint8_t field, std::string& out) {
   out.clear();
   if (!opened || record.nameLen == 0) return false;
-  if (record.nameOff > head.nameLen || sizeof(uint64_t) > head.nameLen - record.nameOff ||
-      record.nameLen > head.nameLen - record.nameOff - sizeof(uint64_t))
-    return false;
+  uint32_t start = record.nameOff;
+  uint32_t end = head.nameLen;
+  if (head.formatVersion == CLIX_FORMAT_VERSION && !recordBlobBounds(record, start, end)) return false;
+  if (start > end || sizeof(uint64_t) > end - start || record.nameLen > end - start - sizeof(uint64_t)) return false;
 
-  uint32_t at = record.nameOff + sizeof(uint64_t) + record.nameLen;
+  uint32_t at = start + sizeof(uint64_t) + record.nameLen;
   for (uint8_t i = 0; i <= field; i++) {
-    if (at >= head.nameLen) return false;
+    if (at >= end) return false;
     uint8_t len = 0;
     if (!readAt(head.nameStart + at, &len, sizeof(len))) return false;
     ++at;
-    if (len > head.nameLen - at) return false;
+    if (len > end - at) return false;
     if (i == field) {
       out.resize(len);
-      return len == 0 || readAt(head.nameStart + at, out.data(), len);
+      if (len == 0 || readAt(head.nameStart + at, out.data(), len)) return true;
+      out.clear();
+      return false;
     }
     at += len;
   }
   return false;
+}
+
+bool LibraryIndexFile::readSeriesExtension(const ClixRecord& record, uint32_t& cursor, uint32_t& end) {
+  cursor = 0;
+  if (record.nameLen == 0 || !recordBlobBounds(record, cursor, end)) return false;
+  if (sizeof(uint64_t) > end - cursor || record.nameLen > end - cursor - sizeof(uint64_t)) return false;
+  cursor += sizeof(uint64_t) + record.nameLen;
+  // Three length-prefixed legacy fields precede the series payload.
+  for (int field = 0; field < 3; ++field) {
+    uint8_t len = 0;
+    if (cursor >= end || !readAt(head.nameStart + cursor, &len, sizeof(len))) return false;
+    ++cursor;
+    if (len > end - cursor) return false;
+    cursor += len;
+  }
+  uint8_t seriesLen = 0;
+  if (cursor >= end || !readAt(head.nameStart + cursor, &seriesLen, sizeof(seriesLen))) return false;
+  uint32_t at = cursor + 1;
+  if (seriesLen > end - at) return false;
+  at += seriesLen;
+  uint8_t hasIndex = 0;
+  if (at >= end || !readAt(head.nameStart + at, &hasIndex, sizeof(hasIndex)) || hasIndex > 1) return false;
+  ++at;
+  if (hasIndex == 0) return at == end;
+  if (sizeof(float) != end - at) return false;
+  uint8_t raw[sizeof(float)];
+  float value = 0;
+  if (!readAt(head.nameStart + at, raw, sizeof(raw))) return false;
+  memcpy(&value, raw, sizeof(value));
+  return std::isfinite(value);
+}
+
+bool LibraryIndexFile::readSeries(const ClixRecord& record, std::string& out) {
+  out.clear();
+  if (!opened) return false;
+  if (head.formatVersion == CLIX_LEGACY_FORMAT_VERSION) return true;
+  uint32_t cursor = 0;
+  uint32_t end = 0;
+  if (!readSeriesExtension(record, cursor, end)) return false;
+  uint8_t len = 0;
+  if (!readAt(head.nameStart + cursor, &len, sizeof(len))) return false;
+  out.resize(len);
+  if (len == 0 || readAt(head.nameStart + cursor + 1, out.data(), len)) return true;
+  out.clear();
+  return false;
+}
+
+bool LibraryIndexFile::readSeriesIndex(const ClixRecord& record, std::optional<float>& out) {
+  out.reset();
+  if (!opened) return false;
+  if (head.formatVersion == CLIX_LEGACY_FORMAT_VERSION) return true;
+  uint32_t cursor = 0;
+  uint32_t end = 0;
+  if (!readSeriesExtension(record, cursor, end)) return false;
+  uint8_t seriesLen = 0;
+  if (!readAt(head.nameStart + cursor, &seriesLen, sizeof(seriesLen))) return false;
+  cursor += 1 + seriesLen;
+  uint8_t hasIndex = 0;
+  if (!readAt(head.nameStart + cursor, &hasIndex, sizeof(hasIndex))) return false;
+  if (hasIndex == 0 || seriesLen == 0) return true;
+  uint8_t raw[sizeof(float)];
+  float value = 0;
+  if (!readAt(head.nameStart + cursor + 1, raw, sizeof(raw))) return false;
+  memcpy(&value, raw, sizeof(value));
+  out = value;
+  return true;
 }
 
 bool LibraryIndexFile::readAuthor(const ClixRecord& record, std::string& out) {

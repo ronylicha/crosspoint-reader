@@ -11,7 +11,8 @@
 //   header        64 bytes of struct, padded to 512
 //   folders       F variable-length records; the id of a folder IS its ordinal
 //   records       N x exactly 128 bytes, in folded-title order
-//   permutations  authorOrder[N] then arrivalOrder[N], both u16
+//   permutations  authorOrder[N], arrivalOrder[N], then seriesOrder[N], all u16
+//   series groups first permutation position per group, capacity N x u16
 //   names         path hash, filename, display author, title, and source author blobs
 //
 // The fixed 128-byte record stride is the load-bearing choice: record k lives at
@@ -27,8 +28,9 @@ namespace library {
 
 inline constexpr char CLIX_MAGIC[4] = {'C', 'L', 'X', '1'};
 // Bumping this is the whole migration: an index from an older version fails
-// validation and is rebuilt. No previous development format is accepted.
-inline constexpr uint8_t CLIX_FORMAT_VERSION = 2;
+// validation and is rebuilt. Version 2 remains readable for reconciliation.
+inline constexpr uint8_t CLIX_FORMAT_VERSION = 3;
+inline constexpr uint8_t CLIX_LEGACY_FORMAT_VERSION = 2;
 
 // Bump when the fold or a permutation's sort key changes.
 // Forces fold and ranks to be rebuilt while firstSeen values are preserved, so
@@ -87,7 +89,9 @@ struct ClixHeader {
   // Expected total file size. Comparing it with the real size is a free
   // truncation guard: a build interrupted by a power cut cannot pass.
   uint32_t selfSize;
-  uint8_t reserved[20];
+  uint32_t seriesGroupsStart;
+  uint16_t seriesGroupCount;
+  uint8_t reserved[14];
 };
 static_assert(sizeof(ClixHeader) == 64, "ClixHeader must be exactly 64 bytes");
 
@@ -123,7 +127,13 @@ inline void layoutSections(ClixHeader& h, const uint32_t folderBytes, const uint
   h.folderLen = folderBytes;
   h.recordStart = alignUp(h.folderStart + folderBytes);
   h.permStart = alignUp(h.recordStart + static_cast<uint32_t>(h.bookCount) * sizeof(ClixRecord));
-  h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * 2u * sizeof(uint16_t));
+  if (h.formatVersion == CLIX_LEGACY_FORMAT_VERSION) {
+    h.seriesGroupsStart = 0;
+    h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * 2u * sizeof(uint16_t));
+  } else {
+    h.seriesGroupsStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * 3u * sizeof(uint16_t));
+    h.nameStart = alignUp(h.seriesGroupsStart + static_cast<uint32_t>(h.bookCount) * sizeof(uint16_t));
+  }
   h.nameLen = nameBytes;
   h.selfSize = h.nameStart + nameBytes;
 }
@@ -136,6 +146,9 @@ inline uint32_t authorOrderOffset(const ClixHeader& h, const uint16_t k) {
 }
 inline uint32_t arrivalOrderOffset(const ClixHeader& h, const uint16_t k) {
   return h.permStart + (static_cast<uint32_t>(h.bookCount) + k) * sizeof(uint16_t);
+}
+inline uint32_t seriesOrderOffset(const ClixHeader& h, const uint16_t k) {
+  return h.permStart + (static_cast<uint32_t>(h.bookCount) * 2u + k) * sizeof(uint16_t);
 }
 
 // Why a loaded index was rejected. Reported rather than swallowed so a rebuild
@@ -151,30 +164,55 @@ enum class ClixValidity : uint8_t {
   SectionsInconsistent,
 };
 
-// Validate a header against the real file size. Cheap enough to run on the one
-// sector already read, and strict enough that nothing downstream has to
-// re-check bounds.
-inline ClixValidity validateHeaderStructure(const ClixHeader& h, const uint64_t actualFileSize) {
+namespace detail {
+
+inline ClixValidity validateHeaderStructureImpl(const ClixHeader& h, const uint64_t actualFileSize,
+                                                const bool allowLegacy) {
   for (size_t i = 0; i < sizeof(CLIX_MAGIC); i++) {
     if (h.magic[i] != CLIX_MAGIC[i]) return ClixValidity::BadMagic;
   }
-  if (h.formatVersion != CLIX_FORMAT_VERSION) return ClixValidity::UnknownFormatVersion;
+  const bool legacy = h.formatVersion == CLIX_LEGACY_FORMAT_VERSION;
+  if (h.formatVersion != CLIX_FORMAT_VERSION && !(allowLegacy && legacy)) {
+    return ClixValidity::UnknownFormatVersion;
+  }
   if (h.bookCount > CLIX_MAX_RECORDS) return ClixValidity::CountOutOfRange;
+  if (!legacy && (h.seriesGroupCount > h.bookCount || (h.bookCount > 0 && h.seriesGroupCount == 0))) {
+    return ClixValidity::CountOutOfRange;
+  }
   if (h.metadataEnabled > 1) return ClixValidity::SectionsInconsistent;
   if (actualFileSize != h.selfSize) return ClixValidity::SizeMismatch;
 
-  // Both lengths are attacker-controlled bytes. Capped against the real file
-  // size they cannot wrap the 32-bit section sums below, so the layout
-  // comparison stays sound instead of re-deriving the same wrapped values.
   if (h.folderLen > actualFileSize || h.nameLen > actualFileSize) return ClixValidity::SectionsInconsistent;
 
-  ClixHeader expected = h;
-  layoutSections(expected, h.folderLen, h.nameLen);
-  if (expected.folderStart != h.folderStart || expected.recordStart != h.recordStart ||
-      expected.permStart != h.permStart || expected.nameStart != h.nameStart || expected.selfSize != h.selfSize) {
+  // Widen before addition so malformed section lengths cannot reproduce a
+  // wrapped 32-bit layout during validation.
+  const auto aligned = [](const uint64_t value) { return (value + CLIX_ALIGN - 1) / CLIX_ALIGN * CLIX_ALIGN; };
+  const uint64_t records = aligned(static_cast<uint64_t>(CLIX_ALIGN) + h.folderLen);
+  const uint64_t permutations = aligned(records + static_cast<uint64_t>(h.bookCount) * sizeof(ClixRecord));
+  const uint64_t permutationEnd =
+      permutations + static_cast<uint64_t>(h.bookCount) * (legacy ? 2u : 3u) * sizeof(uint16_t);
+  const uint64_t groups = legacy ? 0 : aligned(permutationEnd);
+  const uint64_t names =
+      legacy ? aligned(permutationEnd) : aligned(groups + static_cast<uint64_t>(h.bookCount) * sizeof(uint16_t));
+  if (h.folderStart != CLIX_ALIGN || records != h.recordStart || permutations != h.permStart || names != h.nameStart ||
+      names + h.nameLen != h.selfSize || (!legacy && groups != h.seriesGroupsStart)) {
     return ClixValidity::SectionsInconsistent;
   }
   return ClixValidity::Ok;
+}
+
+}  // namespace detail
+
+// Runtime readers accept only the current format; directory contents are
+// validated separately when a group is read.
+inline ClixValidity validateHeaderStructure(const ClixHeader& h, const uint64_t actualFileSize) {
+  return detail::validateHeaderStructureImpl(h, actualFileSize, false);
+}
+
+// Reconciliation may preserve arrival history from a structurally valid v2
+// index, ignoring the old reserved bytes and fold version.
+inline ClixValidity validateHeaderStructureForReconciliation(const ClixHeader& h, const uint64_t actualFileSize) {
+  return detail::validateHeaderStructureImpl(h, actualFileSize, true);
 }
 
 inline ClixValidity validateHeader(const ClixHeader& h, const uint64_t actualFileSize) {

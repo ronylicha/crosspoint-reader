@@ -430,8 +430,9 @@ Written by `lib/LibraryIndex/LibraryBuilder.cpp`, read by `LibraryIndexFile`. On
 file describing every book on the card, so the shelf can sort and search
 thousands of titles without opening any of them.
 
-Format version 2. An index written by another version fails validation on open
-and is rebuilt; that is the entire migration mechanism.
+Current format version: **3**. Normal library reads accept version 3 only.
+Version 2 remains readable through `openForReconciliation` so an automatic
+rebuild can preserve the arrival history while collecting series metadata.
 
 ### Layout
 
@@ -440,8 +441,25 @@ and is rebuilt; that is the entire migration mechanism.
 | Header | 0 | 64 bytes, `ClixHeader` |
 | Folders | `folderStart` | length-prefixed paths, one per folder |
 | Records | `recordStart` | `bookCount` × 128-byte `ClixRecord` |
-| Permutations | `permStart` | `bookCount` u16 author order, then `bookCount` u16 arrival order |
-| Name blob | `nameStart` | per record: path hash, name, canonical author, title, source author (see below) |
+| Permutations | `permStart` | `bookCount` u16 author order, then arrival order, then series order |
+| Series groups | `seriesGroupsStart` | first position of each group in series order; `bookCount` u16 slots reserved |
+| Name blob | `nameStart` | per record: path hash, name, canonical author, title, source author, series, optional series index |
+
+The header and record strides remain **64** and **128 bytes**. Version 3 uses
+six formerly reserved header bytes:
+
+| Header field | Byte offset | Size | Meaning |
+| --- | --- | --- | --- |
+| `seriesGroupsStart` | 44 | 4 | absolute byte offset of the series group directory |
+| `seriesGroupCount` | 48 | 2 | number of populated group entries |
+| `reserved` | 50 | 14 | remaining reserved bytes |
+
+The directory has capacity for one group per book, but only its first
+`seriesGroupCount` entries are populated. Each entry is a starting **row in the
+series permutation**, not a record ordinal. Group starts increase strictly,
+with the first at zero. The reader exposes `bookCount` as the end sentinel;
+this sentinel is not written after the populated entries. An empty index has
+zero groups; a nonempty index must have between one and `bookCount` groups.
 
 The arrival permutation runs oldest first, keyed by the record's FAT
 modification time (when the file landed on the card); `firstSeen` — the
@@ -451,6 +469,38 @@ fold bump rebuilds ranks while preserving `firstSeen`.
 Fold version 4 preserves leading articles in title sort and search keys.
 
 Sections are 512-byte aligned so each starts on an SD block boundary.
+
+For `N = bookCount`, the permutation offsets are:
+
+```text
+author row k:  permStart + 2*k
+arrival row k: permStart + 2*(N+k)
+series row k:  permStart + 2*(2*N+k)       # version 3 only
+```
+
+Version-aware section arithmetic uses `alignUp(x)` to round to the next
+512-byte boundary:
+
+```text
+folderStart = 512
+recordStart = alignUp(folderStart + folderLen)
+permStart   = alignUp(recordStart + 128*N)
+
+version 3:
+  seriesGroupsStart = alignUp(permStart + 6*N)
+  nameStart         = alignUp(seriesGroupsStart + 2*N)
+
+version 2, reconciliation only:
+  seriesGroupsStart = 0
+  nameStart         = alignUp(permStart + 4*N)
+
+selfSize = nameStart + nameLen
+```
+
+For example, with three books and seven bytes of folder records, both formats
+place records at 1024 and permutations at 1536. Version 3 places the group
+directory at 2048 and names at 2560. Version 2 has no group directory and places
+names at 2048. A version 2 file must never be interpreted with version 3 offsets.
 
 ### Records are exactly 128 bytes
 
@@ -483,7 +533,26 @@ Per record, at `nameStart + nameOff`:
 [u8][author]     display author, one spelling chosen per authorKey across the library
 [u8][title]      the book's own title, or length 0 if it never gave one
 [u8][source]     cleaned author spelling before the library-wide spelling vote
+[u8 seriesLen][series]  UTF-8 series name; length 0 means no series
+[u8 hasIndex]          0 or 1
+[float32 index]        present only when hasIndex is 1
 ```
+
+The final three fields are the version 3 extension. The float uses the
+ESP32's four-byte little-endian representation; it must be finite. For example,
+series `Cycle` with index 2.5 ends with:
+
+```text
+05 43 79 63 6c 65 01 00 00 20 40
+```
+
+No series and no index are represented by `00 00`. The builder writes a series
+index only for a nonempty series key. Reader methods expose missing series and
+index as valid empty values. They validate the extension within the current
+record's blob boundary, including the exact remaining float size, flag range,
+and finiteness. A truncated or malformed extension fails rather than reading
+into the next book. Float bytes are copied with `memcpy`, avoiding unaligned
+loads on ESP32-C3.
 
 The filename must stay the first textual field and stay the filename: `readPath`
 rebuilds a book's path from it, so writing the display title there makes the book
@@ -493,11 +562,45 @@ The source author is separate from the displayed canonical author so a later
 rebuild can repeat the spelling vote after books are added or removed. Existing
 display reads still stop at the author or title fields and retain their offsets.
 
+Version 2 blobs stop after the source author. Reconciliation readers expose
+empty series metadata for those records; they do not attempt to read an extension.
+
+### Series order and grouping
+
+The builder normalises the stored series name to NFC and groups by the full
+folded key of that name. Group identity does not use a truncated prefix.
+Named series sort by that key; the empty key forms the last group, displayed as
+**No series**. Within a series, books with a finite numeric index come first in
+ascending numeric order, followed by books without an index. The folded title
+then breaks ties, followed by the record ordinal for deterministic ordering.
+
+`seriesGroupStart(group)` locates each folder's range without loading all group
+names. The series view can project book row identifiers independently of a
+search: at the 4,096-book limit, series identifiers and search identifiers each
+require at most 8 KiB. This is separate from the builder's temporary staging
+and sorting buffers and does not mean the entire index is resident in RAM.
+
+### Migration from version 2
+
+Opening an old version 2 index in the library triggers a version 3 rebuild.
+The reconciliation path reads the structurally valid legacy header, records,
+path hashes, and two permutations. It preserves each matched book's
+`firstSeen` and the header's `nextFirstSeen`. Metadata reuse requires the current
+format, so migration performs an OPF metadata pass for eligible EPUBs to collect
+title, author, series, and series index together. Subsequent version 3 rebuilds
+can reuse metadata under the freshness checks below.
+
+The interrupted-install recovery path also accepts a structurally valid
+version 2 backup for reconciliation. It does not require deleting the old index
+or resetting arrival order. Unsupported formats cannot provide this legacy
+history. The library metadata pass does not change the EPUB `book.bin` format.
+
 ### Freshness and unchanged rebuilds
 
 Reconciliation treats the persisted 64-bit complete-path fingerprint as the
-book identity. Metadata is reused only when the fingerprint, size, nonzero FAT
-timestamp, fold version, metadata mode, and expected extraction status agree.
+book identity. Metadata is reused only when the current format, fingerprint,
+size, nonzero FAT timestamp, fold version, metadata mode, and expected
+extraction status agree.
 EPUBs with a zero timestamp or a previous extraction failure are parsed again.
 
 If every current record reuses metadata, the old and new counts agree, and no

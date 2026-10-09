@@ -16,8 +16,8 @@
 #include "components/media/cover-grid.h"
 
 // Indexed books occupy three shelves of four covers, ordered by recency,
-// title, or author. Only the visible page is materialized; cover decoding
-// reuses one file handle without a second framebuffer or PSRAM dependency.
+// title, author, or their series. Only the visible page is materialized;
+// cover decoding reuses one file handle without a second framebuffer or PSRAM dependency.
 // Ring position 0 focuses the sort strip; positions 1..N select books.
 class LibraryListActivity final : public UiTabListActivity {
  public:
@@ -86,6 +86,8 @@ class LibraryListActivity final : public UiTabListActivity {
   void swallowHeldReleases();
   // Staged back-out shared by Button::Back and the header back arrow.
   void handleBackAction();
+  void enterSeries(int entry);
+  void leaveSeries();
   static void searchActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
   static void rebuildActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
   static void backActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
@@ -94,6 +96,14 @@ class LibraryListActivity final : public UiTabListActivity {
   void applyFilter();
   int bookRowCount() const;
   int rowFor(int entry) const;
+  bool seriesTabActive() const;
+  bool seriesFoldersVisible() const;
+  int seriesFolderCount() const;
+  uint16_t seriesGroupForEntry(int entry) const;
+  bool readSeriesFolder(int entry, std::string& name, uint16_t& count);
+  void updateSeriesRange();
+  void rebuildFilteredSeriesGroups();
+  bool activeSortDegraded() const;
   // fileName, when asked for, is the on-card name the row's icon derives from
   // (the display title may come from metadata and carry no extension).
   bool rowTextFor(int entry, std::string& title, std::string& author, std::string* fileName = nullptr);
@@ -107,6 +117,7 @@ class LibraryListActivity final : public UiTabListActivity {
   // Materializes ListItems and their strings for the visible window only.
   void buildRows(UiScreen& screen);
   void buildShelves(UiScreen& screen);
+  void buildSeriesFolders(UiScreen& screen);
   struct ShelfBook {
     std::string title;
     std::string author;
@@ -161,6 +172,18 @@ class LibraryListActivity final : public UiTabListActivity {
   std::unique_ptr<uint16_t[]> filtered;
   uint16_t filteredCount = 0;
   bool filterFailed = false;
+
+  // Group IDs are index-local; the raw series name survives an index rebuild.
+  int selectedSeriesGroup = -1;
+  std::string selectedSeriesName;
+  uint16_t seriesFirst = 0;
+  uint16_t seriesEnd = 0;
+  uint16_t seriesMatchFirst = 0;
+  uint16_t seriesMatchCount = 0;
+  freeink::ui::ListNav seriesFolderNav;
+  // Search projection only: unfiltered folders use the on-card directory.
+  std::unique_ptr<uint16_t[]> filteredSeriesGroups;
+  uint16_t filteredSeriesGroupCount = 0;
 
   // One start row per group. Grouping is only offered for the sorted <=512-book
   // index, so this fallible allocation is at most 1 KiB and is reused after its

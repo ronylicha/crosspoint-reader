@@ -17,6 +17,7 @@ ClixHeader makeHeader(const uint16_t books, const uint32_t folderBytes = 300, co
   h.formatVersion = CLIX_FORMAT_VERSION;
   h.foldVersion = CLIX_FOLD_VERSION;
   h.bookCount = books;
+  h.seriesGroupCount = books > 0 ? 1 : 0;
   h.folderCount = 4;
   layoutSections(h, folderBytes, nameBytes == 0 ? books * 80u : nameBytes);
   return h;
@@ -30,7 +31,8 @@ TEST(LibraryFormat, StructSizesAreFrozen) {
   EXPECT_EQ(sizeof(ClixHeader), 64u);
   EXPECT_EQ(sizeof(ClixRecord), 128u);
   EXPECT_EQ(sizeof(ClixFolderHeader), 1u);
-  EXPECT_EQ(CLIX_FORMAT_VERSION, 2u);
+  EXPECT_EQ(CLIX_FORMAT_VERSION, 3u);
+  EXPECT_EQ(CLIX_LEGACY_FORMAT_VERSION, 2u);
 }
 
 TEST(LibraryFormat, RecordsTileSectorsExactly) {
@@ -43,11 +45,14 @@ TEST(LibraryFormat, RecordsTileSectorsExactly) {
 }
 
 TEST(LibraryFormat, EverySectionStartsOnASectorBoundary) {
-  for (const uint16_t n : {uint16_t{0}, uint16_t{1}, uint16_t{3}, uint16_t{60}, uint16_t{200}, uint16_t{2000}}) {
+  for (const uint16_t n :
+       {uint16_t{0}, uint16_t{1}, uint16_t{3}, uint16_t{60}, uint16_t{85}, uint16_t{86}, uint16_t{200}, uint16_t{255},
+        uint16_t{256}, uint16_t{257}, uint16_t{2000}, uint16_t{4096}}) {
     const ClixHeader h = makeHeader(n, 29u * 4u);
     EXPECT_EQ(h.folderStart % CLIX_ALIGN, 0u) << "n=" << n;
     EXPECT_EQ(h.recordStart % CLIX_ALIGN, 0u) << "n=" << n;
     EXPECT_EQ(h.permStart % CLIX_ALIGN, 0u) << "n=" << n;
+    EXPECT_EQ(h.seriesGroupsStart % CLIX_ALIGN, 0u) << "n=" << n;
     EXPECT_EQ(h.nameStart % CLIX_ALIGN, 0u) << "n=" << n;
   }
 }
@@ -57,7 +62,8 @@ TEST(LibraryFormat, SectionsDoNotOverlap) {
   EXPECT_GE(h.folderStart, sizeof(ClixHeader));
   EXPECT_GE(h.recordStart, h.folderStart + h.folderLen);
   EXPECT_GE(h.permStart, h.recordStart + 200u * sizeof(ClixRecord));
-  EXPECT_GE(h.nameStart, h.permStart + 200u * 2u * sizeof(uint16_t));
+  EXPECT_GE(h.seriesGroupsStart, h.permStart + 200u * 3u * sizeof(uint16_t));
+  EXPECT_GE(h.nameStart, h.seriesGroupsStart + 200u * sizeof(uint16_t));
   EXPECT_EQ(h.selfSize, h.nameStart + h.nameLen);
 }
 
@@ -76,21 +82,30 @@ TEST(LibraryFormat, PermutationArraysDoNotOverlapEachOther) {
   EXPECT_EQ(authorOrderOffset(h, 99), h.permStart + 198u);
   EXPECT_EQ(arrivalOrderOffset(h, 0), h.permStart + 200u);
   EXPECT_GT(arrivalOrderOffset(h, 0), authorOrderOffset(h, h.bookCount - 1));
+  EXPECT_EQ(seriesOrderOffset(h, 0), h.permStart + 400u);
+  EXPECT_EQ(seriesOrderOffset(h, 99), h.permStart + 598u);
+  EXPECT_GT(seriesOrderOffset(h, 0), arrivalOrderOffset(h, h.bookCount - 1));
+  EXPECT_GT(h.seriesGroupsStart, seriesOrderOffset(h, h.bookCount - 1));
 }
 
 TEST(LibraryFormat, SizeArithmeticMatchesTheSpecTable) {
-  // Spec section 3.7, the 200-book row: 512 header + 1536 folders + 25600
-  // records + 1024 permutations + 16000 names.
+  // Sector-padded sections: header, folders, fixed records, three permutations,
+  // the capacity-N series directory, and variable names.
   ClixHeader h{};
   memcpy(h.magic, CLIX_MAGIC, sizeof(CLIX_MAGIC));
   h.formatVersion = CLIX_FORMAT_VERSION;
   h.foldVersion = CLIX_FOLD_VERSION;
   h.bookCount = 200;
+  h.seriesGroupCount = 1;
   layoutSections(h, 29u * 50u, 80u * 200u);
   EXPECT_EQ(h.folderStart, 512u);
   EXPECT_EQ(h.recordStart, 2048u);
   EXPECT_EQ(h.permStart, 2048u + 25600u);
-  EXPECT_EQ(h.selfSize, 44672u);
+  const uint32_t permutationBytes = alignUp(200u * 3u * sizeof(uint16_t));
+  const uint32_t groupBytes = alignUp(200u * sizeof(uint16_t));
+  EXPECT_EQ(h.seriesGroupsStart, h.permStart + permutationBytes);
+  EXPECT_EQ(h.nameStart, h.seriesGroupsStart + groupBytes);
+  EXPECT_EQ(h.selfSize, 512u + 1536u + 25600u + permutationBytes + groupBytes + 16000u);
 }
 
 TEST(LibraryFormatValidation, AcceptsAWellFormedHeader) {
@@ -198,4 +213,103 @@ TEST(LibraryFormat, ByteImageIsStableAcrossBuilds) {
   EXPECT_EQ(offsetof(ClixHeader, bookCount), 8u);
   EXPECT_EQ(offsetof(ClixHeader, folderStart), 16u);
   EXPECT_EQ(offsetof(ClixHeader, selfSize), 40u);
+  EXPECT_EQ(offsetof(ClixHeader, seriesGroupsStart), 44u);
+  EXPECT_EQ(offsetof(ClixHeader, seriesGroupCount), 48u);
+  EXPECT_EQ(offsetof(ClixHeader, reserved), 50u);
+}
+
+TEST(LibraryFormat, SeriesDirectoryReservesOneEntryPerBookRegardlessOfGroupCount) {
+  for (const uint16_t books :
+       {uint16_t{1}, uint16_t{85}, uint16_t{86}, uint16_t{255}, uint16_t{256}, uint16_t{257}, uint16_t{4096}}) {
+    ClixHeader h = makeHeader(books, 116);
+    ASSERT_EQ(validateHeader(h, h.selfSize), ClixValidity::Ok);
+    EXPECT_EQ(h.seriesGroupsStart, alignUp(h.permStart + books * 3u * sizeof(uint16_t)));
+    EXPECT_EQ(h.nameStart, alignUp(h.seriesGroupsStart + books * sizeof(uint16_t)));
+    const uint32_t nameStart = h.nameStart;
+    h.seriesGroupCount = books;
+    layoutSections(h, h.folderLen, h.nameLen);
+    EXPECT_EQ(h.nameStart, nameStart);
+    EXPECT_EQ(validateHeader(h, h.selfSize), ClixValidity::Ok);
+  }
+}
+
+TEST(LibraryFormatValidation, RejectsMissingOrExcessSeriesGroups) {
+  ClixHeader h = makeHeader(13);
+  h.seriesGroupCount = 0;
+  EXPECT_EQ(validateHeaderStructure(h, h.selfSize), ClixValidity::CountOutOfRange);
+  EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize), ClixValidity::CountOutOfRange);
+  h.seriesGroupCount = 14;
+  EXPECT_EQ(validateHeader(h, h.selfSize), ClixValidity::CountOutOfRange);
+  h = makeHeader(0);
+  h.seriesGroupCount = 1;
+  EXPECT_EQ(validateHeader(h, h.selfSize), ClixValidity::CountOutOfRange);
+}
+
+TEST(LibraryFormatValidation, RejectsTamperedSeriesDirectoryOffsets) {
+  ClixHeader h = makeHeader(86, 116);
+  h.seriesGroupsStart += CLIX_ALIGN;
+  EXPECT_EQ(validateHeaderStructure(h, h.selfSize), ClixValidity::SectionsInconsistent);
+  EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize), ClixValidity::SectionsInconsistent);
+  h = makeHeader(86, 116);
+  h.seriesGroupsStart = h.permStart;
+  EXPECT_EQ(validateHeader(h, h.selfSize), ClixValidity::SectionsInconsistent);
+  h = makeHeader(86, 116);
+  h.nameStart = h.seriesGroupsStart;
+  EXPECT_EQ(validateHeader(h, h.selfSize), ClixValidity::SectionsInconsistent);
+}
+
+TEST(LibraryFormatValidation, LegacyTwoPermutationLayoutIsAcceptedOnlyForReconciliation) {
+  ClixHeader legacy = makeHeader(200, 29u * 50u, 80u * 200u);
+  legacy.formatVersion = CLIX_LEGACY_FORMAT_VERSION;
+  layoutSections(legacy, legacy.folderLen, legacy.nameLen);
+  EXPECT_EQ(legacy.seriesGroupsStart, 0u);
+  EXPECT_EQ(legacy.nameStart, legacy.permStart + alignUp(200u * 2u * sizeof(uint16_t)));
+  EXPECT_EQ(legacy.selfSize, 44672u);
+  EXPECT_EQ(validateHeaderStructure(legacy, legacy.selfSize), ClixValidity::UnknownFormatVersion);
+  EXPECT_EQ(validateHeader(legacy, legacy.selfSize), ClixValidity::UnknownFormatVersion);
+  EXPECT_EQ(validateHeaderStructureForReconciliation(legacy, legacy.selfSize), ClixValidity::Ok);
+  // These 20 bytes were reserved in v2; no interpretation may reject history.
+  memset(reinterpret_cast<uint8_t*>(&legacy) + offsetof(ClixHeader, seriesGroupsStart), 0xFF, 20);
+  legacy.foldVersion = CLIX_FOLD_VERSION + 1;
+  EXPECT_EQ(validateHeaderStructureForReconciliation(legacy, legacy.selfSize), ClixValidity::Ok);
+  legacy.recordStart += CLIX_ALIGN;
+  EXPECT_EQ(validateHeaderStructureForReconciliation(legacy, legacy.selfSize), ClixValidity::SectionsInconsistent);
+}
+
+TEST(LibraryFormatValidation, LegacyEmptyAndMaximumLibrariesRetainTheirOriginalLayout) {
+  for (const uint16_t books : {uint16_t{0}, uint16_t{4096}}) {
+    ClixHeader h = makeHeader(books, 0);
+    h.formatVersion = CLIX_LEGACY_FORMAT_VERSION;
+    layoutSections(h, 0, h.nameLen);
+    EXPECT_EQ(h.nameStart, alignUp(h.permStart + books * 2u * sizeof(uint16_t)));
+    EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize), ClixValidity::Ok);
+    EXPECT_EQ(validateHeaderStructure(h, h.selfSize), ClixValidity::UnknownFormatVersion);
+    EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize + 1), ClixValidity::SizeMismatch);
+  }
+}
+
+TEST(LibraryFormatValidation, ReconciliationRejectsUnrecognizedFormats) {
+  for (const uint8_t version : {uint8_t{0}, uint8_t{1}, uint8_t{4}, uint8_t{255}}) {
+    ClixHeader h = makeHeader(1);
+    h.formatVersion = version;
+    EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize), ClixValidity::UnknownFormatVersion);
+  }
+}
+
+TEST(LibraryFormatValidation, WidenedValidationRejectsSelfConsistentWrappedSectionArithmetic) {
+  for (const uint8_t version : {CLIX_LEGACY_FORMAT_VERSION, CLIX_FORMAT_VERSION}) {
+    ClixHeader h = makeHeader(0);
+    h.formatVersion = version;
+    // Both lengths pass the file-size cap, while sector alignment wraps the
+    // 32-bit writer arithmetic. The validator must derive the wider offsets.
+    layoutSections(h, UINT32_MAX - CLIX_ALIGN, UINT32_MAX);
+    ASSERT_EQ(h.recordStart, 0u);
+    ASSERT_EQ(h.selfSize, UINT32_MAX);
+    ASSERT_LE(h.folderLen, h.selfSize);
+    ASSERT_LE(h.nameLen, h.selfSize);
+    EXPECT_EQ(validateHeaderStructureForReconciliation(h, h.selfSize), ClixValidity::SectionsInconsistent);
+    if (version == CLIX_FORMAT_VERSION) {
+      EXPECT_EQ(validateHeaderStructure(h, h.selfSize), ClixValidity::SectionsInconsistent);
+    }
+  }
 }

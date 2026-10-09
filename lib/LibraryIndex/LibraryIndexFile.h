@@ -10,6 +10,7 @@
 #include <HalStorage.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "LibraryFormat.h"
@@ -25,6 +26,7 @@ enum class SortOrder : uint8_t {
   TitleDesc,
   AuthorAsc,
   AuthorDesc,
+  SeriesAsc,
 };
 
 // One book to locate in the index: the complete-path hash (clixPathHash) is
@@ -47,8 +49,8 @@ class LibraryIndexFile {
   // caused by a format bug is visible in the log rather than looking like a slow
   // first boot.
   bool open(const char* path);
-  // Accept an otherwise valid stale fold so a rebuild can preserve arrival
-  // history without exposing stale sort/search keys to the browser.
+  // Accept an otherwise valid CLX v2 index or stale fold so a rebuild can
+  // preserve arrival history. Browser reads require the current v3 format.
   bool openForReconciliation(const char* path);
   void close();
   bool isOpen() const { return opened; }
@@ -57,6 +59,12 @@ class LibraryIndexFile {
   ClixValidity validity() const { return lastValidity; }
   const ClixHeader& header() const { return head; }
   uint16_t bookCount() const { return opened ? head.bookCount : 0; }
+  uint16_t seriesGroupCount() const {
+    return opened && head.formatVersion == CLIX_FORMAT_VERSION ? head.seriesGroupCount : 0;
+  }
+  // SeriesAsc row where a group starts. The count sentinel returns bookCount();
+  // values past that sentinel or invalid/legacy readers return 0xFFFF.
+  uint16_t seriesGroupStart(uint16_t group);
   bool ranksDegraded() const { return opened && (head.flags & CLIX_FLAG_RANKS_DEGRADED) != 0; }
   bool dedupDegraded() const { return opened && (head.flags & CLIX_FLAG_DEDUP_DEGRADED) != 0; }
 
@@ -88,14 +96,23 @@ class LibraryIndexFile {
   // Cleaned author spelling before the library-wide spelling vote. Empty is a
   // valid value, so success is independent of `out.empty()`.
   bool readSourceAuthor(const ClixRecord& record, std::string& out);
+  // Missing series and index are valid empty values. Legacy v2 readers expose
+  // empty metadata; corrupt/truncated v3 extensions return false.
+  bool readSeries(const ClixRecord& record, std::string& out);
+  bool readSeriesIndex(const ClixRecord& record, std::optional<float>& out);
 
   // Absolute path of the book, rebuilt from its folder record.
   bool readPath(const ClixRecord& record, std::string& out);
 
  private:
-  bool openImpl(const char* path, bool acceptStaleFold);
+  bool openImpl(const char* path, bool acceptStaleFold, bool acceptLegacy);
   bool readAt(uint32_t offset, void* dst, size_t len);
   bool readBlobField(const ClixRecord& record, uint8_t field, std::string& out);
+  // Relative offsets into the names section, bounded by this book's blob.
+  // The end cannot include the following book even when this blob is damaged.
+  bool recordBlobBounds(const ClixRecord& record, uint32_t& start, uint32_t& end);
+  // Locate the v3 extension after the legacy fields, retaining its strict end.
+  bool readSeriesExtension(const ClixRecord& record, uint32_t& cursor, uint32_t& end);
 
   HalFile file;
   ClixHeader head{};

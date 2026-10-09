@@ -153,6 +153,7 @@ class HalFile {
     if (size == 0) return 0;
     if (!node || fake::fail(fake::failRead)) return -1;
     size = std::min(size, node->bytes.size() - std::min(pos, node->bytes.size()));
+    if (size == 0) return 0;
     std::memcpy(out, node->bytes.data() + std::min(pos, node->bytes.size()), size);
     pos += size;
     return static_cast<int>(size);

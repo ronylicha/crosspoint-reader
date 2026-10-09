@@ -1,5 +1,7 @@
+#include <LibrarySeriesView/LibrarySeriesView.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <climits>
 
 #include "LibraryShelfLayout/LibraryShelfLayout.h"
@@ -167,4 +169,121 @@ TEST(LibraryShelfPagination, EverySelectionAndPageJumpRemainVisibleAndAligned) {
     }
   }
 }
+
+TEST(LibrarySeriesView, SelectsHalfOpenRangesAtExactFilteredPositions) {
+  constexpr uint16_t matches[] = {1, 3, 4, 5, 7, 8, 10, 12};
+  const auto first = library::series::matchingRange(0, 4, matches, 8);
+  EXPECT_EQ(first.first, 0);
+  EXPECT_EQ(first.count, 2);
+  const auto middle = library::series::matchingRange(4, 9, matches, 8);
+  EXPECT_EQ(middle.first, 2);
+  EXPECT_EQ(middle.count, 4);
+  EXPECT_EQ(matches[middle.first], 4);
+  EXPECT_EQ(matches[middle.first + middle.count - 1], 8);
+  const auto last = library::series::matchingRange(9, 13, matches, 8);
+  EXPECT_EQ(last.first, 6);
+  EXPECT_EQ(last.count, 2);
+  EXPECT_EQ(matches[last.first + last.count - 1], 12);
+}
+
+TEST(LibrarySeriesView, KeepsSparseThirteenBookSlicesInGlobalMatchSpace) {
+  constexpr uint16_t matches[] = {1, 3, 4, 5, 7, 8, 10, 12};
+  const auto range = library::series::matchingRange(6, 13, matches, 8);
+  EXPECT_EQ(range.first, 4);
+  EXPECT_EQ(range.count, 4);
+  EXPECT_EQ(matches[range.first], 7);
+  EXPECT_EQ(matches[range.first + 1], 8);
+  EXPECT_EQ(matches[range.first + 2], 10);
+  EXPECT_EQ(matches[range.first + 3], 12);
+  EXPECT_EQ(library::shelf::visibleCount(0, range.count), 4);
+}
+
+TEST(LibrarySeriesView, ReturnsEmptyRangesForMissingOrInvalidInputs) {
+  constexpr uint16_t matches[] = {1, 3, 8};
+  for (const auto range :
+       {library::series::matchingRange(0, 9, nullptr, 3), library::series::matchingRange(0, 9, matches, 0),
+        library::series::matchingRange(8, 8, matches, 3), library::series::matchingRange(9, 8, matches, 3)}) {
+    EXPECT_EQ(range.first, 0);
+    EXPECT_EQ(range.count, 0);
+  }
+  const auto gap = library::series::matchingRange(4, 8, matches, 3);
+  EXPECT_EQ(gap.first, 2);
+  EXPECT_EQ(gap.count, 0);
+  const auto pastEnd = library::series::matchingRange(9, 12, matches, 3);
+  EXPECT_EQ(pastEnd.first, 3);
+  EXPECT_EQ(pastEnd.count, 0);
+}
+
+TEST(LibrarySeriesView, IncludesWholeLibraryAndIncompleteLastBucketAtFormatCapacity) {
+  std::array<uint16_t, 4096> matches{};
+  for (uint16_t row = 0; row < matches.size(); ++row) matches[row] = row;
+  const auto all = library::series::matchingRange(0, 4096, matches.data(), matches.size());
+  EXPECT_EQ(all.first, 0);
+  EXPECT_EQ(all.count, 4096);
+  const auto last = library::series::matchingRange(4092, 4096, matches.data(), matches.size());
+  EXPECT_EQ(last.first, 4092);
+  EXPECT_EQ(last.count, 4);
+  EXPECT_EQ(matches[last.first + last.count - 1], 4095);
+}
+
+TEST(LibrarySeriesView, MapsAscendingAndDescendingEntriesToGlobalGroups) {
+  EXPECT_EQ(library::series::groupForEntry(0, 4096, false), 0);
+  EXPECT_EQ(library::series::groupForEntry(4095, 4096, false), 4095);
+  EXPECT_EQ(library::series::groupForEntry(0, 4096, true), 4095);
+  EXPECT_EQ(library::series::groupForEntry(4095, 4096, true), 0);
+  constexpr uint16_t groups[] = {2, 8, 17};
+  EXPECT_EQ(library::series::groupForEntry(0, 3, false, groups), 2);
+  EXPECT_EQ(library::series::groupForEntry(1, 3, false, groups), 8);
+  EXPECT_EQ(library::series::groupForEntry(2, 3, false, groups), 17);
+  EXPECT_EQ(library::series::groupForEntry(0, 3, true, groups), 17);
+  EXPECT_EQ(library::series::groupForEntry(1, 3, true, groups), 8);
+  EXPECT_EQ(library::series::groupForEntry(2, 3, true, groups), 2);
+}
+
+TEST(LibrarySeriesView, RejectsInvalidIntegerInputsBeforeAccessingFilteredGroups) {
+  constexpr uint16_t groups[] = {2, 8, 17};
+  for (const int entry : {INT_MIN, -1, 3, INT_MAX}) {
+    EXPECT_EQ(library::series::groupForEntry(entry, 3, false, groups), UINT16_MAX);
+    EXPECT_EQ(library::series::groupForEntry(entry, 3, true, groups), UINT16_MAX);
+  }
+  for (const int count : {INT_MIN, -1, 0, INT_MAX}) {
+    EXPECT_EQ(library::series::groupForEntry(0, count, false, groups), UINT16_MAX);
+    EXPECT_EQ(library::series::groupForEntry(0, count, true, groups), UINT16_MAX);
+  }
+}
+
+TEST(LibrarySeriesView, PreservesStripFocusEvenWhenFolderIdentitySurvives) {
+  constexpr uint16_t groups[] = {2, 8, 17};
+  EXPECT_EQ(library::series::restoredFolderRing(0, 17, 3, false, groups), 0);
+  EXPECT_EQ(library::series::restoredFolderRing(0, 17, 3, true, groups), 0);
+  EXPECT_EQ(library::series::restoredFolderRing(0, 4095, 4096, false), 0);
+}
+
+TEST(LibrarySeriesView, RestoresFolderIdentityAfterFilteringAndSortDirectionChange) {
+  constexpr uint16_t groups[] = {2, 8, 17};
+  EXPECT_EQ(library::series::restoredFolderRing(18, 17, 3, false, groups), 3);
+  EXPECT_EQ(library::series::restoredFolderRing(18, 17, 3, true, groups), 1);
+  EXPECT_EQ(library::series::restoredFolderRing(3, 2, 3, false, groups), 1);
+  EXPECT_EQ(library::series::restoredFolderRing(1, 2, 3, true, groups), 3);
+  EXPECT_EQ(library::series::restoredFolderRing(2, 8, 3, false, groups), 2);
+  EXPECT_EQ(library::series::restoredFolderRing(2, 8, 3, true, groups), 2);
+  EXPECT_EQ(library::series::restoredFolderRing(4096, 4095, 4096, true), 1);
+}
+
+TEST(LibrarySeriesView, ClampsMissingFoldersAndEmptyLibrariesWithoutIntegerOverflow) {
+  constexpr uint16_t groups[] = {2, 8, 17};
+  EXPECT_EQ(library::series::restoredFolderRing(2, 9, 3, false, groups), 2);
+  EXPECT_EQ(library::series::restoredFolderRing(10, 9, 3, true, groups), 3);
+  EXPECT_EQ(library::series::restoredFolderRing(INT_MAX, 9, 3, false, groups), 3);
+  EXPECT_EQ(library::series::restoredFolderRing(INT_MIN, 9, 3, true, groups), 0);
+  EXPECT_EQ(library::series::restoredFolderRing(10, UINT16_MAX, 3, false, groups), 3);
+  for (const int count : {INT_MIN, -1, 0, INT_MAX})
+    EXPECT_EQ(library::series::restoredFolderRing(INT_MAX, 17, count, false, groups), 0);
+}
+
+constexpr uint16_t STATIC_MATCHES[] = {2, 4, 7};
+static_assert(library::series::matchingRange(3, 7, STATIC_MATCHES, 3).first == 1);
+static_assert(library::series::matchingRange(3, 7, STATIC_MATCHES, 3).count == 1);
+static_assert(library::series::groupForEntry(0, 3, true, STATIC_MATCHES) == 7);
+static_assert(library::series::restoredFolderRing(2, 7, 3, true, STATIC_MATCHES) == 1);
 }  // namespace
