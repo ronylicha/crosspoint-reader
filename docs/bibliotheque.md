@@ -1,22 +1,35 @@
 # Bibliothèque : couvertures sur étagères
 
-Cette refonte est incluse dans le [firmware X4 Pro de v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3), dont l'asset `firmware-x4pro-jeux.bin` a été mis à jour sans changer de version. Les sources correspondent au [commit `566517c7`](https://github.com/ronylicha/crosspoint-reader/commit/566517c790756dd1ca269d0f5459a6a86788e23a). Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** sont disponibles dans le [firmware X4 Pro de v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3). L'asset `firmware-x4pro-jeux.bin` a été mis à jour depuis le [commit source `f537c15c`](https://github.com/ronylicha/crosspoint-reader/commit/f537c15c1168c50767e824873a45fdba5ea0a9f9), sans changer de version. Les essais sur liseuse restent à effectuer.
 
 La bibliothèque affiche les livres sous forme de couvertures posées sur trois étagères. Chaque page contient jusqu'à **12 livres : quatre colonnes et trois rangées**. Les emplacements restants restent vides sur la dernière page. Un cadre indique le livre sélectionné.
 
 ## Retrouver un livre
 
-Les trois onglets changent l'ordre des livres :
+Les quatre onglets permettent de retrouver les livres :
 
 | Onglet | Classement |
 | --- | --- |
 | Récents | Livres récents ; l'historique de lecture apparaît en tête lorsque ce classement est affiché du plus récent au plus ancien, sans recherche active |
 | Titre | Ordre alphabétique des titres |
 | Auteur | Ordre alphabétique des auteurs |
+| Séries | Dossiers virtuels par série, avec leur nom et leur nombre de livres |
 
 Activez de nouveau l'onglet sélectionné pour inverser son ordre. La flèche de l'onglet indique le sens du tri. La recherche réduit la bibliothèque aux livres dont le titre ou l'auteur correspond au texte saisi. Par exemple, recherchez `verne` pour retrouver les livres de Jules Verne.
 
 Pour retrouver toute la bibliothèque, effacez le texte dans la recherche. Un livre sans titre renseigné utilise son nom de fichier comme titre de remplacement ; un auteur manquant apparaît comme inconnu.
+
+## Parcourir les séries
+
+Ouvrez l'onglet **Séries**, puis choisissez un dossier. Les livres apparaissent sur les mêmes étagères de quatre colonnes et trois rangées. Les dossiers regroupent les livres d'une série, même si les fichiers sont répartis dans plusieurs dossiers de la carte SD. **Sans série** rassemble ceux dont aucune série n'est renseignée.
+
+Dans une série, les livres avec un numéro de tome apparaissent par ordre numérique croissant : `3`, `3.5`, puis `10`, par exemple. Les livres sans numéro viennent ensuite. Le titre départage les livres au même numéro et ceux sans numéro. Inverser le tri de l'onglet **Séries** inverse l'ordre des dossiers ; les tomes restent dans l'ordre de lecture à l'intérieur.
+
+La recherche porte sur le titre et l'auteur. Dans la liste des séries, elle conserve seulement les dossiers contenant un livre correspondant et leur compteur indique le nombre de résultats. Dans un dossier ouvert, elle réduit les livres affichés à ceux de cette série. **Retour** ramène d'abord à la liste des dossiers et restaure le dossier sélectionné, en conservant la recherche. Un nouvel appui sur **Retour** efface ensuite la recherche.
+
+Les noms de série et les numéros de tome proviennent des informations enregistrées dans l'EPUB, notamment par Calibre ou dans les collections de type série d'un EPUB 3. Un nom de fichier ne suffit pas à définir une série. Activez **Réglages → Système → Utiliser les métadonnées**, puis reconstruisez l'index de la bibliothèque pour lire ces informations. Si ce réglage est désactivé, les livres se retrouvent dans **Sans série** après reconstruction.
+
+Après avoir renseigné une série dans Calibre, transférez le fichier EPUB mis à jour sur la carte SD puis reconstruisez l'index. Faites de même après l'ajout ou le transfert de nouveaux tomes. À la première ouverture avec la nouvelle fonctionnalité, l'ancien index est mis à jour automatiquement ; l'ordre d'arrivée des livres déjà connus est conservé.
 
 ## Ouvrir un livre et consulter sa fiche
 
@@ -30,9 +43,10 @@ La fiche présente les informations disponibles :
 
 - titre et auteur ;
 - nom du fichier et chemin sur la carte SD ;
-- format du fichier et taille.
+- format du fichier et taille ;
+- série et numéro de tome lorsqu'ils sont renseignés.
 
-Le titre et l'auteur proviennent des informations relevées dans le livre. Le format est identifié à partir du fichier. La taille correspond à celle relevée lors de la dernière mise à jour de la bibliothèque. Si une information manque, la fiche utilise les informations disponibles sur le fichier. Elle n'affiche pas d'ISBN, de résumé ou de langue qui n'ont pas été collectés.
+Le titre, l'auteur, la série et le tome proviennent des informations relevées dans le livre. Le format est identifié à partir du fichier. La taille correspond à celle relevée lors de la dernière mise à jour de la bibliothèque. Si une information manque, la fiche utilise les informations disponibles sur le fichier. Elle n'affiche pas d'ISBN, de résumé ou de langue qui n'ont pas été collectés.
 
 Fermez la fiche avec **Retour** pour reprendre la navigation.
 
@@ -57,21 +71,20 @@ Après avoir ajouté, renommé ou déplacé des livres sur la carte SD, utilisez
 
 ## Vérification sur liseuse
 
-La suite complète passe avec **514 tests hôte**, dont **19 tests ciblés de la bibliothèque**. Ces 19 tests passent aussi sous ASan/UBSan sans diagnostic. La revue des chemins de grille, cache, navigation et fiche n'a relevé aucun problème après correction du rendu des dialogues. La compilation finale du firmware **X4 Pro réussit** ; aucun résultat matériel n'est acquis.
+La suite complète passe avec **555 tests hôte**. Les **104 tests ciblés de format, lecture d'index, construction d'index, étagères et navigation** passent aussi sous ASan/UBSan. La revue ciblée n'a relevé aucun problème restant après validation de deux corrections. La compilation X4 Pro réussit sans avertissement en **285,938 secondes** ; les **659 fichiers de production** sont identiques au snapshot avant et après compilation. Aucun résultat matériel n'est acquis.
 
-Téléchargez le [firmware X4 Pro avec bibliothèque sur étagères](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) : **5 876 768 octets**. Son SHA-256 est `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`. Le téléchargement depuis l'URL publique a été comparé au build local : les fichiers sont identiques et le digest GitHub correspond. L'image ESP32-S3 passe les vérifications de checksum et de hash internes d'esptool.
-
-La release conserve son tag historique ; ses notes indiquent le commit source du binaire actualisé. Pour l'installation, suivez les [instructions du README](../README.md#installation).
+Le [firmware publié avec Séries](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) compte **5 886 192 octets**. Son SHA-256 est `91c2ddb900278bd8c72ff9cff7770075a312c7d3c728cd7f5770d3866c400cc1`. Le téléchargement depuis l'URL publique a été comparé au build local : les fichiers sont identiques et le digest GitHub correspond. La release garde sa version ; ses notes précisent le commit source du binaire actualisé. Pour l'installation, suivez les [instructions du README](../README.md#installation).
 
 Les essais suivants vérifient le rendu E-Ink et les commandes sur l'appareil :
 
-1. Ajoutez au moins 13 livres à la carte SD, dont un livre sans couverture et deux livres du même auteur. Ouvrez la bibliothèque : vérifiez les quatre colonnes, les trois rangées et la page suivante.
+1. Préparez une série d'au moins **13 tomes**, dont des numéros `3.5` et `10` et un livre sans numéro. Ajoutez une deuxième série, un livre sans série et un livre sans couverture. Activez les métadonnées et reconstruisez l'index.
 2. Parcourez les livres avec les boutons, puis avec le tactile si l'appareil le permet. Vérifiez le cadre de sélection et l'ouverture du bon fichier.
-3. Testez chaque onglet dans les deux sens, puis recherchez un titre et un auteur. Effacez la recherche pour retrouver tous les livres.
-4. Ouvrez la fiche par un appui long. Vérifiez le titre, l'auteur, le nom du fichier, son chemin, son format et sa taille. Relâchez l'appui : le livre doit rester dans la bibliothèque.
-5. Choisissez **Supprimer**, puis annulez. Vérifiez que le fichier reste présent. Avec un livre de test, confirmez ensuite la suppression et vérifiez sa disparition.
-6. Retirez un livre des récents et retrouvez-le par son titre. Réindexez après l'ajout d'un autre livre et vérifiez qu'il apparaît.
-7. Répétez les essais en portrait et en paysage. Vérifiez que les couvertures, les titres et la fiche restent lisibles, sans éléments coupés par les marges de l'écran.
-8. Parcourez plusieurs pages puis quittez et rouvrez la bibliothèque. Avec le moniteur série de développement, recherchez les erreurs de carte SD ou de mémoire et vérifiez que l'appareil reste stable.
+3. Ouvrez **Séries** : vérifiez les noms, les compteurs et **Sans série**. Dans la série de 13 livres, vérifiez les quatre colonnes, trois rangées et la page suivante. Vérifiez l'ordre numérique `3.5` avant `10`, puis les livres sans numéro. Inversez l'ordre des dossiers : celui des tomes doit rester croissant.
+4. Recherchez un titre puis un auteur : vérifiez les dossiers conservés et leurs compteurs. Entrez dans un dossier, puis appuyez sur **Retour** : le même dossier doit rester sélectionné avec la recherche active. Un nouvel appui sur Retour efface la recherche.
+5. Ouvrez la fiche par un appui long. Vérifiez le titre, l'auteur, le fichier, le chemin, le format, la taille, la série et le tome. Relâchez l'appui : le livre doit rester dans la bibliothèque.
+6. Choisissez **Supprimer**, puis annulez. Avec un livre de test, confirmez ensuite la suppression. Supprimez le dernier livre d'une série de test et vérifiez la disparition du dossier vide ainsi que le retour à une sélection accessible.
+7. Retirez un livre des récents et retrouvez-le par son titre. Réindexez après le transfert d'un nouveau tome et vérifiez son dossier, son compteur et sa place. Désactivez les métadonnées puis reconstruisez : vérifiez **Sans série** ; réactivez et reconstruisez pour retrouver les groupes.
+8. Répétez les essais en portrait et en paysage. Vérifiez que les couvertures, les titres et la fiche restent lisibles, sans éléments coupés par les marges de l'écran.
+9. Parcourez plusieurs pages puis quittez et rouvrez la bibliothèque. Avec le moniteur série de développement, recherchez les erreurs de carte SD ou de mémoire et vérifiez que l'appareil reste stable.
 
 Les temps de rafraîchissement, la lisibilité des couvertures et le confort de l'appui long doivent être jugés sur l'écran de la liseuse.

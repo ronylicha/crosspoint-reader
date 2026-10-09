@@ -4,7 +4,7 @@
 
 **Version actuelle : 1.6.5-games.3** — basée sur CrossPoint Reader officiel **1.6.5**.
 
-La bibliothèque sur étagères est incluse dans le [firmware X4 Pro de la release v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3). L'asset `firmware-x4pro-jeux.bin` a été mis à jour à partir du [commit source `566517c7`](https://github.com/ronylicha/crosspoint-reader/commit/566517c790756dd1ca269d0f5459a6a86788e23a), sans changer de numéro de version. Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** sont inclus dans le [firmware X4 Pro de la release v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3). L'asset `firmware-x4pro-jeux.bin` a été mis à jour depuis le [commit source `f537c15c`](https://github.com/ronylicha/crosspoint-reader/commit/f537c15c1168c50767e824873a45fdba5ea0a9f9), sans changer de version. Les essais sur liseuse restent à effectuer.
 
 ---
 
@@ -58,11 +58,15 @@ Détail des règles et commandes : [docs/jeux.md](./docs/jeux.md).
 
 La bibliothèque affiche jusqu'à **12 livres par page**, avec leurs couvertures sur **trois étagères de quatre livres**. Un cadre repère le livre sélectionné. Les onglets **Récents**, **Titre** et **Auteur** proposent chacun les deux sens de tri ; la recherche filtre les titres et les auteurs.
 
-Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format et taille. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD ; une couverture absente garde une vignette de remplacement.
+Le quatrième onglet **Séries** affiche des dossiers avec leur nom et leur nombre de livres, ainsi qu'un dossier **Sans série**. Ouvrez un dossier pour retrouver la grille 3×4, classée par numéro de tome croissant puis par titre ; les livres sans numéro viennent après les tomes numérotés. **Retour** restaure le dossier sélectionné avant d'effacer une éventuelle recherche. Le sens du tri de Séries concerne les dossiers ; les tomes gardent leur ordre de lecture.
+
+Activez **Réglages → Système → Utiliser les métadonnées** pour lire les séries et tomes renseignés dans les EPUB. Après un transfert ou une modification de ces informations, reconstruisez l'index. À la première ouverture avec Séries, l'ancien index est mis à jour automatiquement en conservant l'ordre d'arrivée des livres déjà connus. Si les métadonnées sont désactivées, les livres apparaissent dans **Sans série** après reconstruction.
+
+Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format, taille, série et tome. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD ; une couverture absente garde une vignette de remplacement.
 
 Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
 
-Validation : **514 tests hôte passent**, dont **19 tests bibliothèque** également validés sous ASan/UBSan sans diagnostic. La compilation X4 Pro réussit. Le [firmware publié](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), téléchargé depuis son URL publique, est identique au build local : **5 876 768 octets**, SHA-256 `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`.
+Validation Séries : **555 tests hôte passent**, ainsi que **104 tests ciblés sous ASan/UBSan**. La compilation X4 Pro réussit sans avertissement, avec **659 fichiers de production identiques au snapshot**. Le [firmware publié](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), téléchargé depuis son URL publique, est identique au build local : **5 886 192 octets**, SHA-256 `91c2ddb900278bd8c72ff9cff7770075a312c7d3c728cd7f5770d3866c400cc1`. Le digest GitHub correspond également.
 
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 

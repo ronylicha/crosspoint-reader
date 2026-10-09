@@ -124,30 +124,37 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. It is included in the updated [X4 Pro firmware asset for v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), built from [source commit `566517c7`](https://github.com/ronylicha/crosspoint-reader/commit/566517c790756dd1ca269d0f5459a6a86788e23a). Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The **Series** tab is included in the updated [X4 Pro firmware for v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), built from [source commit `f537c15c`](https://github.com/ronylicha/crosspoint-reader/commit/f537c15c1168c50767e824873a45fdba5ea0a9f9) without changing the release version. Checks on the reader remain necessary.
 
-Three tabs select the order of the books. The arrow beside the active tab shows the sort direction:
+Four tabs organise the books. The arrow beside the active tab shows the sort direction:
 
 - **Recent** orders books by recency. With newest first and no search active, the reading history appears at the top, followed by the remaining indexed books.
 - **Title** sorts titles A-Z or Z-A.
 - **Author** sorts authors A-Z or Z-A.
+- **Series** shows virtual folders with each series name and book count. **No series** contains books without series metadata. Open a folder to browse its books on the same three shelves.
+
+Inside a series, books with volume numbers appear in numeric ascending order, for example `3`, `3.5`, then `10`; books without a number follow. Titles break ties. Reversing the Series tab changes the order of the folders; volumes inside a folder remain in reading order. These folders group books by their metadata, independently of their physical location on the SD card.
 
 Search matches titles and authors. For example, search for `verne` to find Jules Verne's books. Clear the search text to show all books again. Books without a metadata title use their filename; missing authors appear as unknown.
+
+In the Series folder list, search keeps only folders containing matching books, and their counts show the number of matches. Inside an open series, search shows matching books from that series. **Back** returns to the folder list first and restores the selected folder while keeping the search; press **Back** again to clear the search.
 
 On a button-only device:
 
 - Use the navigation buttons to select the previous or next book. Hold a navigation button to move to another page of twelve covers.
 - Press **Confirm** to open the selected book.
-- Press **Back** to clear an active search; press it again to focus the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to open Search. Holding a navigation button steps through the tabs.
+- Press **Back** to leave an open series folder; otherwise it clears an active search, then returns focus to the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to open Search. Holding a navigation button steps through the tabs.
 - Hold **Confirm for one second** on a selected book to open its details.
 
 On a touch device, tap a cover to open its book. Swipe up or down to move to another page of twelve covers. Tap a tab to change the order, or tap the active tab again to reverse it. Use the Search icon to enter a title or author. Long-press a cover to open its details.
 
-The details popup shows the available title, author, filename, location on the SD card, format, and indexed file size. **Book actions** is available from the first page to open the book, refresh the library, delete the file with confirmation, or remove it from reading history when applicable. Choose **More details** if the information spans several pages. Removing a book from Recent keeps its file on the SD card. Press **Back** to close the popup.
+The details popup shows the available title, author, filename, location on the SD card, format, indexed file size, series, and volume number. **Book actions** is available from the first page to open the book, refresh the library, delete the file with confirmation, or remove it from reading history when applicable. Choose **More details** if the information spans several pages. Removing a book from Recent keeps its file on the SD card. Press **Back** to close the popup.
 
-Cover thumbnails are cached on the SD card and prepared one at a time. A book without a usable cover keeps a placeholder and remains accessible. The index is created automatically the first time the Library is opened. After adding, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
+Cover thumbnails are cached on the SD card and prepared one at a time. A book without a usable cover keeps a placeholder and remains accessible. Enable **Settings → System → Use Book Metadata** to read series and volume information stored in EPUBs, including metadata written by Calibre and EPUB 3 series collections. With metadata disabled, rebuilding puts books in **No series**. A filename does not define a series.
 
-The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with 514 tests; the 19 library tests also pass under ASan/UBSan without diagnostics, and the final X4 Pro firmware compiles successfully. The published [firmware asset](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) was downloaded from its public URL and matches the local build exactly: 5,876,768 bytes, SHA-256 `5443966311d1be82b2b2959db7d6747326f7b5281aeeca4ed03b13a52609876c`. The existing release version is unchanged. These checks do not establish how twelve covers or long detail pages look on the reader's E-Ink screen.
+The index is created automatically the first time the Library is opened. When upgrading to Series, the previous index is rebuilt automatically while preserving the arrival history of known books. After transferring a new volume, changing metadata, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. Updated metadata in Calibre must be transferred in the EPUB before refreshing the library.
+
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **555 tests**, and **104 targeted tests pass under ASan/UBSan**. The X4 Pro build succeeds without warnings; all 659 production files match the build snapshot. The published [release asset](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) was downloaded from its public URL and matches the local build exactly: **5,886,192 bytes**, SHA-256 `91c2ddb900278bd8c72ff9cff7770075a312c7d3c728cd7f5770d3866c400cc1`, also matching GitHub's digest. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 
