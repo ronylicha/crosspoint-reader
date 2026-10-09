@@ -4,6 +4,8 @@
 
 **Version actuelle : 1.6.5-games.3** — basée sur CrossPoint Reader officiel **1.6.5**.
 
+La refonte de la bibliothèque décrite ci-dessous est un changement local validé par les tests et la compilation X4 Pro. Elle ne correspond pas à une nouvelle release publiée et sa présence dans les binaires déjà téléchargeables n'est pas garantie. Les essais sur liseuse restent à effectuer.
+
 ---
 
 ## Politique de versionnement
@@ -52,6 +54,16 @@ Tout le firmware CrossPoint 1.6.5 officiel, **plus** :
 
 Détail des règles et commandes : [docs/jeux.md](./docs/jeux.md).
 
+### Bibliothèque sur étagères
+
+La refonte locale affiche jusqu'à **12 livres par page**, avec leurs couvertures sur **trois étagères de quatre livres**. Un cadre repère le livre sélectionné. Les onglets **Récents**, **Titre** et **Auteur** proposent chacun les deux sens de tri ; la recherche filtre les titres et les auteurs.
+
+Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format et taille. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD ; une couverture absente garde une vignette de remplacement.
+
+Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
+
+Validation locale : **514 tests hôte passent**, dont **19 tests bibliothèque** également validés sous ASan/UBSan sans diagnostic. La compilation X4 Pro réussit ; le binaire local est `build/library-x4pro/firmware-x4pro-bibliotheque.bin`.
+
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 
 - **Moteur de lecture** : rendu EPUB 2/3 avec option de style embarqué, gestion des images, césure, crénage, tableaux adaptatifs, annotations ruby CJK, navigation par chapitre, notes de bas de page, marque-pages, dictionnaire ([StarDict](docs/dictionary.md)), aller-à-%, tourne-page automatique, contrôle d'orientation, lecture focalisée, synchro de progression KOReader, et plus.
@@ -59,7 +71,7 @@ Détail des règles et commandes : [docs/jeux.md](./docs/jeux.md).
 - **Lecture tactile** : suivi des liens EPUB et recherche au dictionnaire sur les appareils tactiles.
 - **Polices personnalisées** sur carte SD.
 - **Mode lecteur USB (X4 Pro)** : la carte SD vue comme stockage de masse USB.
-- **Bibliothèque** : recherche indexée titre/auteur, vues récents/alphabétique, navigateur de dossiers, gestion du cache SD.
+- **Bibliothèque** : recherche par titre ou auteur, classement des livres, navigateur de dossiers et cache sur carte SD. La présentation sur étagères est décrite dans les [ajouts locaux du fork](./docs/bibliotheque.md).
 - **Sans fil** : interface web de transfert de fichiers, EPUB Optimizer, réglages web, WebDAV, mode AP (hotspot) et STA avec QR codes, connexion Calibre sans fil, navigateur OPDS (jusqu'à 8 serveurs), mises à jour OTA depuis les releases GitHub.
 - **Personnalisation** : mode nuit, thèmes (Classic, Lyra, Lyra Extended, RoundedRaff), écrans de veille, remappage des boutons, barre d'état, etc.
 - **Localisation** : 34 langues d'interface, dont CJK et RTL.
@@ -132,6 +144,7 @@ pio run -e x4pro -t upload
 
 ## Documentation
 
+- [Bibliothèque : étagères, recherche et fiche du livre](./docs/bibliotheque.md)
 - [Jeux : règles et commandes](./docs/jeux.md)
 - [Guide utilisateur CrossPoint](./USER_GUIDE.md)
 - [Serveur web](./docs/webserver.md) · [Endpoints](./docs/webserver-endpoints.md)
@@ -141,6 +154,6 @@ pio run -e x4pro -t upload
 
 ## Remerciements
 
-Tout le mérite du firmware de base revient à la communauté [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader). Ce fork ne fait qu'y greffer des jeux pour le X4 Pro.
+Tout le mérite du firmware de base revient à la communauté [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader). Ce fork ajoute les jeux pour le X4 Pro et une présentation de la bibliothèque sur étagères.
 
 CrossPoint Reader n'est **affilié ni à Xteink ni à aucun fabricant**. Ce fork non plus.

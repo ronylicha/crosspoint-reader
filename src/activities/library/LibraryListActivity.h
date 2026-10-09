@@ -1,7 +1,10 @@
 #pragma once
 
+#include <Bitmap.h>
+#include <HalStorage.h>
 #include <LibraryIndexFile.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -10,25 +13,12 @@
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
+#include "components/media/cover-grid.h"
 
-// One Library screen: every indexed book on the card shown by recency, title,
-// or author. The Recent shelf orders by file modification time (when a book
-// landed on the card) and pins the recently OPENED books from RecentBooksStore
-// on top, so active reads and fresh arrivals share one list.
-//
-// The two-slot row is the whole point rather than a styling choice: the problem
-// being solved is "I cannot find my books because I do not know the authors",
-// and that is answered by a column the eye can sweep, not by a tidier filename.
-//
-// Rows render through fui::list on the UiTabListActivity ring (0 = the sort
-// strip, 1..N = the books), which is what brings touch to rows and tabs. Titles
-// are truncated to one line by the widget — more books on the screen, even if
-// half a name is hidden.
-//
-// Only the visible window of rows is materialized per render (strings and
-// ListItems for at most one page). The ordinary shelf therefore keeps one page
-// of strings; an active search additionally uses one fallible uint16_t slot per
-// indexed book so an allocation failure remains recoverable on the C3.
+// Indexed books occupy three shelves of four covers, ordered by recency,
+// title, or author. Only the visible page is materialized; cover decoding
+// reuses one file handle without a second framebuffer or PSRAM dependency.
+// Ring position 0 focuses the sort strip; positions 1..N select books.
 class LibraryListActivity final : public UiTabListActivity {
  public:
   LibraryListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
@@ -78,6 +68,7 @@ class LibraryListActivity final : public UiTabListActivity {
   void resetAfterRebuild();
   // Recent-row long-press menu: open / remove from recents / delete / rebuild.
   void showRecentBookOptions(int entry);
+  void showBookDetails(int entry, int page = 0);
   void promptRemoveRecentBook(const std::string& path, const std::string& title);
   // Long-press delete owns the gesture where grouping does not apply: the
   // Recent sort, degraded lists, and any active search result.
@@ -115,6 +106,20 @@ class LibraryListActivity final : public UiTabListActivity {
   void buildHeader(UiScreen& screen);
   // Materializes ListItems and their strings for the visible window only.
   void buildRows(UiScreen& screen);
+  void buildShelves(UiScreen& screen);
+  struct ShelfBook {
+    std::string title;
+    std::string author;
+    std::string path;
+    std::string thumbPath;
+    uint32_t fileSize = 0;
+  };
+  bool resolveBook(int entry, ShelfBook& book);
+  void prepareShelf(int top, int thumbHeight);
+  bool paintShelfCover(freeink::ui::Rect rect, uint16_t entry);
+  static freeink::ui::CoverGridItem shelfItemProvider(uint16_t index, void* user);
+  static bool shelfCoverPainter(freeink::ui::DrawTarget& target, freeink::ui::Rect rect,
+                                const freeink::ui::CoverGridItem& item, uint16_t index, void* user);
   static void formatInitialHeading(uint32_t initial, std::string& out);
   void formatAuthorHeading(const std::string& author, std::string& out) const;
   void drawPositionReadout() const;
@@ -174,6 +179,16 @@ class LibraryListActivity final : public UiTabListActivity {
   std::vector<std::string> winTitles;
   std::vector<std::string> winAuthors;
   std::vector<std::string> winHeaders;
+
+  static constexpr size_t SHELF_PAGE_SIZE = 12;
+  std::array<ShelfBook, SHELF_PAGE_SIZE> shelfBooks;
+  int shelfTop = -1;
+  int shelfCount = 0;
+  int shelfThumbHeight = 0;
+  freeink::ui::CoverGridProps shelfGrid{};
+  freeink::ui::ListProps shelfNavigation{};
+  HalFile shelfCoverFile;
+  Bitmap shelfCoverBitmap{shelfCoverFile};
 
   // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the
   // book is not in the index), and the current-direction rows to skip, sorted

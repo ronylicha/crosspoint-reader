@@ -124,24 +124,30 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card and shows their titles and authors without requiring you to remember their folders. Its four tabs provide different views. An arrow beside an indexed tab shows the sort direction:
+The Library indexes up to 4,096 supported books on the SD card. This fork's local shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. This source change does not announce a new downloadable release; checks on the reader remain necessary.
 
-- **Recent** lists the ten books you opened most recently. Hold a book to remove it from this list.
-- **Added** keeps books in the order in which the Library first discovered them. Down shows newest additions first; up shows oldest first.
-- **Title** groups books by the first letter of the title. Up sorts A-Z and down sorts Z-A. Titles beginning with numbers or punctuation appear under `#`; letters from non-English scripts, including Hebrew, have their own groups.
-- **Author** groups books by author. Up sorts A-Z and down sorts Z-A.
+Three tabs select the order of the books. The arrow beside the active tab shows the sort direction:
+
+- **Recent** orders books by recency. With newest first and no search active, the reading history appears at the top, followed by the remaining indexed books.
+- **Title** sorts titles A-Z or Z-A.
+- **Author** sorts authors A-Z or Z-A.
+
+Search matches titles and authors. For example, search for `verne` to find Jules Verne's books. Clear the search text to show all books again. Books without a metadata title use their filename; missing authors appear as unknown.
 
 On a button-only device:
 
-- Use **Up/Down** or **Left/Right** to move one row at a time. Hold a direction to move a page at a time.
+- Use the navigation buttons to select the previous or next book. Hold a navigation button to move to another page of twelve covers.
 - Press **Confirm** to open the selected book.
-- Press **Back** from the book list to focus the tabs. Use **Left/Right** to select another tab, press **Confirm** to reverse its sort direction, or press **Down** to return to the list.
-- While the tabs are focused, hold **Confirm** to open Search.
-- In the Title or Author views, hold **Confirm** on a book to collapse the list to its letter or author groups. The matching group remains selected. Press **Confirm** to enter a group, or **Back** to restore the exact book and position you came from.
+- Press **Back** to clear an active search; press it again to focus the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to open Search. Holding a navigation button steps through the tabs.
+- Hold **Confirm for one second** on a selected book to open its details.
 
-On a touch device, tap tabs, books, and the Search icon directly. Tap an active indexed tab again to reverse its sort direction. Swipe to scroll. Long-press a book in the Recent view to remove it from the list. Long-press a book in a Title or Author view to collapse to the group list, then tap a group to expand it. The **Added** view is not grouped; tapping or long-pressing a book opens it.
+On a touch device, tap a cover to open its book. Swipe up or down to move to another page of twelve covers. Tap a tab to change the order, or tap the active tab again to reverse it. Use the Search icon to enter a title or author. Long-press a cover to open its details.
 
-The index is created automatically the first time the Library is opened. To pick up later file changes or updated metadata, use **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
+The details popup shows the available title, author, filename, location on the SD card, format, and indexed file size. **Book actions** is available from the first page to open the book, refresh the library, delete the file with confirmation, or remove it from reading history when applicable. Choose **More details** if the information spans several pages. Removing a book from Recent keeps its file on the SD card. Press **Back** to close the popup.
+
+Cover thumbnails are cached on the SD card and prepared one at a time. A book without a usable cover keeps a placeholder and remains accessible. The index is created automatically the first time the Library is opened. After adding, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
+
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with 514 tests; the 19 library tests also pass under ASan/UBSan without diagnostics, and the final X4 Pro firmware compiles successfully. The local binary is `build/library-x4pro/firmware-x4pro-bibliotheque.bin`; it has not been published in a release. These checks do not establish how twelve covers or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 
