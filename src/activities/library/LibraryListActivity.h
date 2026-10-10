@@ -12,6 +12,7 @@
 
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
+#include "components/AppNavigation.h"
 #include "components/OptionPopup.h"
 #include "components/media/cover-grid.h"
 
@@ -41,18 +42,21 @@ class LibraryListActivity final : public UiTabListActivity {
   bool handleCustomInput() override;
   bool handleButtons() override;
   void navigateButtons() override;
-  // The FreeInkUI header owns both the title and search touch target.
-  void drawChrome() override {}
   void drawFooter() override;
   // OptionPopup is a self-contained modal: it owns rendering (and the button
   // hints) whenever it is up.
   void render(RenderLock&& lock) override;
+  bool isModalActive() const override { return optionPopup.isActive(); }
 
  private:
-  // The screen's own actions, after the base's ACTION_ROW / ACTION_TAB.
-  static constexpr freeink::ui::ActionId ACTION_SEARCH = ACTION_TAB_USER;
-  static constexpr freeink::ui::ActionId ACTION_REBUILD = ACTION_SEARCH + 1;
-  static constexpr freeink::ui::ActionId ACTION_BACK = ACTION_REBUILD + 1;
+  // Tap on the context row (search, open series, unsorted notice).
+  static constexpr freeink::ui::ActionId ACTION_CONTEXT_BACK = ACTION_TAB_USER;
+
+  // Sub-bar trailing buttons: rebuild (touch only), then search. Section
+  // pills are handled by appnav.
+  static void subBarActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
+  // Same staged back-out as Button::Back.
+  static void contextBackTrampoline(const freeink::ui::ActionEvent& event, void* user);
 
   // Walk the card and write a fresh index. Blocking, with a popup: at ~70 books
   // it is well under a second, and it only runs when the index is missing or the
@@ -84,13 +88,10 @@ class LibraryListActivity final : public UiTabListActivity {
   // Sub-screens act on button press, so a button still held when we resume must
   // not also act here. Records what to swallow on the next release.
   void swallowHeldReleases();
-  // Staged back-out shared by Button::Back and the header back arrow.
+  // Staged back-out shared by Button::Back and the context-row back arrow.
   void handleBackAction();
   void enterSeries(int entry);
   void leaveSeries();
-  static void searchActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
-  static void rebuildActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
-  static void backActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
 
   // Data
   void applyFilter();
@@ -113,7 +114,9 @@ class LibraryListActivity final : public UiTabListActivity {
   bool groupable() const;
 
   // Screen building
-  void buildHeader(UiScreen& screen);
+  // Context row below the sub-bar, the whole row a back target. Returns its
+  // bottom edge (top when there is no context).
+  int buildContextRow(UiScreen& screen, int top);
   // Materializes ListItems and their strings for the visible window only.
   void buildRows(UiScreen& screen);
   void buildShelves(UiScreen& screen);
@@ -135,7 +138,8 @@ class LibraryListActivity final : public UiTabListActivity {
   void formatAuthorHeading(const std::string& author, std::string& out) const;
   void drawPositionReadout() const;
   void drawHoldHelp() const;
-  const char* headerTitle() const override;
+  // Title of the context row, or nullptr on the plain library view.
+  const char* contextTitle() const;
 
   // Ring 0 is the strip; the selected BOOK is ring - 1, with the strip keeping
   // row 0 as the working selection exactly as the pre-ring code did.
@@ -166,9 +170,9 @@ class LibraryListActivity final : public UiTabListActivity {
   // Empty query means no filtering and this owns no allocation, so the ordinary
   // shelf pays nothing proportional to the library for the feature.
   std::string query;
-  // The active query, pre-quoted for the header: headerTitle() returns a
-  // stable c_str the render task can hold across a build.
-  std::string headerSearchTitle;
+  // The active query, pre-quoted for the context row: contextTitle() returns a
+  // stable c_str the render task can hold across a draw.
+  std::string contextSearchTitle;
   std::unique_ptr<uint16_t[]> filtered;
   uint16_t filteredCount = 0;
   bool filterFailed = false;

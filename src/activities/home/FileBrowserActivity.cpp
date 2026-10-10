@@ -18,6 +18,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/headerIcons.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
 #include "util/BookmarkUtil.h"
@@ -200,6 +201,11 @@ void FileBrowserActivity::prewarmRowGlyphs(const int start) {
 
 void FileBrowserActivity::onEnter() {
   UiListActivity::onEnter();
+  if (mode == Mode::Books) {
+    appnav::registerTabs(app, AppTab::Library);
+    app.on(appnav::ACTION_APP_SUBBAR, &FileBrowserActivity::onSubBarAction, this);
+    app.on(ACTION_FOLDER_UP, &FileBrowserActivity::onFolderUpAction, this);
+  }
 
   fileNameBuffer = makeUniqueNoThrow<char[]>(NAME_BUFFER_SIZE);
   if (!fileNameBuffer) {
@@ -509,6 +515,7 @@ void FileBrowserActivity::renameSelectedFile(const std::string& oldPath, const s
 }
 
 bool FileBrowserActivity::handleCustomInput() {
+  // The modal popup owns every input while open, chrome taps included.
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
   // Long press BACK (1s+) goes to root folder (Books mode only).
@@ -547,24 +554,7 @@ bool FileBrowserActivity::handleButtons() {
     // Short press: go up one directory, or go home if at root
     if (mappedInput.getHeldTime() < GO_HOME_MS) {
       if (basepath != "/") {
-        const std::string oldPath = basepath;
-
-        {
-          // buildScreen() runs on the render task and reads basepath plus `files`
-          // through the row provider; mutate only under the render lock.
-          RenderLock lock(*this);
-          basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
-          if (basepath.empty()) basepath = "/";
-          loadFiles();
-
-          const auto pos = oldPath.find_last_of('/');
-          const std::string dirName = oldPath.substr(pos + 1) + "/";
-          nav.selected = static_cast<int>(findEntry(dirName));
-          nav.top = 0;
-          nav.follow(listCount());
-        }
-
-        requestUpdate();
+        goUpFolder();
       } else if (mode == Mode::PickFirmware) {
         // Firmware picker at root: cancel back to caller instead of going home.
         ActivityResult res;
@@ -579,6 +569,39 @@ bool FileBrowserActivity::handleButtons() {
   }
 
   return false;
+}
+
+void FileBrowserActivity::goUpFolder() {
+  if (basepath == "/") return;
+  const std::string oldPath = basepath;
+  {
+    // buildScreen() runs on the render task and reads basepath plus `files`
+    // through the row provider; mutate only under the render lock.
+    RenderLock lock(*this);
+    basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
+    if (basepath.empty()) basepath = "/";
+    loadFiles();
+
+    const auto pos = oldPath.find_last_of('/');
+    const std::string dirName = oldPath.substr(pos + 1) + "/";
+    nav.selected = static_cast<int>(findEntry(dirName));
+    nav.top = 0;
+    nav.follow(listCount());
+  }
+  requestUpdate();
+}
+
+void FileBrowserActivity::onFolderUpAction(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FileBrowserActivity*>(user);
+  // The list content changes under the tap: drop the flash.
+  self->app.clearTapFlash();
+  self->goUpFolder();
+}
+
+void FileBrowserActivity::onSubBarAction(const fui::ActionEvent& event, void* user) {
+  static_cast<FileBrowserActivity*>(user)->app.clearTapFlash();
+  // No trailing buttons on this sub-bar, so the return value is unused.
+  appnav::handleLibrarySubBarAction(event, appnav::LibrarySection::Files);
 }
 
 void FileBrowserActivity::render(RenderLock&& lock) {
@@ -596,9 +619,18 @@ std::string getFileExtension(const std::string& filename) {
 
 void FileBrowserActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
-                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  int listTop = metrics.topPadding + metrics.headerHeight;  // below PickFirmware's titled header
+  if (mode == Mode::Books) {
+    appnav::buildChrome(screen, renderer, AppTab::Library);
+    listTop = appnav::buildLibrarySubBar(screen, renderer, appnav::contentTop(renderer), appnav::LibrarySection::Files);
+    if (basepath != "/") {
+      buildFolderRow(screen, listTop);
+      listTop += FOLDER_ROW_HEIGHT;
+    }
+  }
+  // Content below the chrome, above the button hints.
+  screen.setContentMarginFromScreen(
+      fui::Insets{static_cast<int16_t>(listTop), 0, static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   // Full path band at the bottom: separator on top, left-truncated so the
@@ -660,17 +692,36 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   screen.list(props);
 }
 
-void FileBrowserActivity::drawChrome() {
-  const auto pageWidth = renderer.getScreenWidth();
+// Current folder name under the sub-bar. On touch boards the row leads with a
+// back arrow and is a tap target that climbs one folder like Button::Back.
+void FileBrowserActivity::buildFolderRow(UiScreen& screen, const int top) {
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const int left = UITheme::getContentArea(renderer).x + metrics.contentSidePadding / 2;
+  const int width = renderer.getScreenWidth();
+  int textX = left;
+  if (mappedInput.hasTouch()) {
+    const freeink::Icon& arrow = icon_header_back_32;
+    appnav::paintIcon(screen.target(), arrow, left, top + (FOLDER_ROW_HEIGHT - arrow.h) / 2);
+    textX += arrow.w + FOLDER_ARROW_GAP;
+    screen.frame().hit(fui::Rect{0, static_cast<int16_t>(top), static_cast<int16_t>(width), FOLDER_ROW_HEIGHT},
+                       ACTION_FOLDER_UP, 0, fui::InputTouch);
+  }
 
-  std::string folderName =
-      (mode == Mode::PickFirmware)
-          ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
-          : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
-  // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
-  // indicator; the rest of the screen renders through the app.
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+  // rowNameBuf is free here: the text draws immediately, before the list
+  // resolves its rows through it.
+  const size_t nameStart = basepath.rfind('/') + 1;
+  snprintf(rowNameBuf, sizeof(rowNameBuf), "%s", basepath.c_str() + nameStart);
+  utf8ComposeNfcInPlace(rowNameBuf);
+  fui::TextStyle style = screen.theme().bodyText;
+  style.bold = true;
+  screen.target().text(fui::Rect{static_cast<int16_t>(textX), static_cast<int16_t>(top),
+                                 static_cast<int16_t>(width - left - textX), FOLDER_ROW_HEIGHT},
+                       rowNameBuf, style);
+}
+
+const char* FileBrowserActivity::headerTitle() const {
+  // Books mode builds its chrome through the app (buildScreen).
+  return mode == Mode::PickFirmware ? tr(STR_SELECT_FIRMWARE_FILE) : nullptr;
 }
 
 void FileBrowserActivity::drawFooter() {

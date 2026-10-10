@@ -6,10 +6,12 @@
 #include <Logging.h>
 #include <Memory.h>
 
+#include <ctime>
 #include <memory>
 
 #include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
+#include "DateTimeSettingsActivity.h"
 #include "MappedInputManager.h"
 #include "TimezonePickerActivity.h"
 #include "components/UITheme.h"
@@ -19,7 +21,8 @@ namespace fui = freeink::ui;
 
 namespace {
 enum MenuItem {
-  ITEM_TIMEZONE = 0,
+  ITEM_DATE_TIME = 0,
+  ITEM_TIMEZONE,
   ITEM_DST,
   ITEM_FORMAT,
   ITEM_SHOW_ON_HOME,
@@ -27,8 +30,8 @@ enum MenuItem {
 };
 
 const StrId menuNames[ClockSettingsActivity::ITEM_COUNT] = {
-    StrId::STR_TIMEZONE,        StrId::STR_CLOCK_DST,      StrId::STR_CLOCK_FORMAT,
-    StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_DATE_TIME,    StrId::STR_TIMEZONE,        StrId::STR_CLOCK_DST,
+    StrId::STR_CLOCK_FORMAT, StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW,
 };
 
 const StrId dstNames[CrossPointSettings::CLOCK_DST_MODE_COUNT] = {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON,
@@ -52,6 +55,13 @@ void ClockSettingsActivity::activateIndex(const int index) {
   nav.selected = index;
   app.clearTapFlash();
   switch (index) {
+    case ITEM_DATE_TIME:
+      if (auto activity = makeUniqueNoThrow<DateTimeSettingsActivity>(renderer, mappedInput)) {
+        startActivityForResult(std::move(activity), nullptr);
+      } else {
+        LOG_ERR("CLKSET", "OOM: DateTimeSettingsActivity");
+      }
+      return;
     case ITEM_TIMEZONE:
       if (auto activity = makeUniqueNoThrow<TimezonePickerActivity>(renderer, mappedInput)) {
         startActivityForResult(std::move(activity), nullptr);
@@ -91,6 +101,12 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
 
   // Every value is a flash/translation string or the member time buffer, so
   // the render pass allocates nothing.
+  struct tm local{};
+  // Shown whenever the RTC holds a plausible date, synced or set by hand.
+  rowItems_[ITEM_DATE_TIME].value =
+      halClock.plausibleLocalTime(local) && strftime(dateTime_, sizeof(dateTime_), "%d/%m/%Y", &local) > 0
+          ? dateTime_
+          : tr(STR_NOT_SET);
   rowItems_[ITEM_TIMEZONE].value = timezones::table()[timezones::activeIndex()].name;
   const uint8_t dst = SETTINGS.clockDst < CrossPointSettings::CLOCK_DST_MODE_COUNT ? SETTINGS.clockDst : uint8_t{0};
   rowItems_[ITEM_DST].value = I18N.get(dstNames[dst]);

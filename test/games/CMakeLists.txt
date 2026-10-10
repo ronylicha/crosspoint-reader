@@ -12,6 +12,9 @@ target_include_directories(GamesTest BEFORE PRIVATE
   ${REPO_ROOT}/lib/GameSession
 )
 target_link_libraries(GamesTest PRIVATE GTest::gtest_main crosspoint_test_common)
+# The game sources compile only for touch firmware (GamesConfig.h); the host
+# build has no BoardConfig, so enable them explicitly.
+target_compile_definitions(GamesTest PRIVATE CROSSPOINT_GAMES=1)
 option(GAMES_SANITIZE "Run native game scenarios with address and undefined-behavior sanitizers" OFF)
 if(GAMES_SANITIZE)
   target_compile_options(GamesTest PRIVATE -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined)

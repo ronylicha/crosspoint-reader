@@ -1,0 +1,10 @@
+# Manifest for src/components/icons/gameCustomIcons.h — regenerate from the repository root with:
+#   python3 freeink-sdk/libs/assets/Icons/tools/gen_icons.py \
+#     --manifest src/components/icons/gameCustomIcons.manifest \
+#     --svgdir src/components/icons/svg \
+#     --sizes 48 --out src/components/icons/gameCustomIcons.h
+# then run ./bin/clang-format-fix -g.
+#
+# Lucide-style drawings that Lucide does not ship. checkers.svg: a crowned
+# draughts king, two stacked pieces seen from the side.
+game-checkers = checkers

@@ -33,24 +33,11 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  // A centered clock needs no left title reserve, so RoundedRaff
                                  // can show one after all.
                                  .headerShowsClock = true,
-                                 .menuRowHeight = 42,  // not authoritative: getMenuRowHeight() derives the drawn height
-                                 .menuSpacing = 6,
                                  .tabSpacing = 10,
                                  .tabBarHeight = 50,
                                  .tabPillFullSlot = true,
                                  .scrollBarWidth = 4,
                                  .scrollBarRightOffset = 5,
-                                 // Tall enough that the home band's centered book title clears the
-                                 // battery strip above and keeps padding below.
-                                 .homeTopPadding = 64,
-                                 // Smaller cover tile so the home menu sits higher (fits 5 items
-                                 // without overlap); shrunk by the homeTopPadding growth above so
-                                 // the menu keeps its position.
-                                 .homeCoverHeight = 300,
-                                 .homeCoverTileHeight = 341,
-                                 .homeRecentBooksCount = 1,
-                                 .homeContinueReadingInMenu = true,
-                                 .homeMenuTopOffset = 20,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
@@ -91,18 +78,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
 
 class RoundedRaffTheme : public BaseTheme {
  public:
-  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
-                  bool backButton = true) const override;
-  void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                           int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
-                           std::function<bool()> storeCoverBuffer) const override;
-  int getMenuRowHeight(const GfxRenderer& renderer) const override;
-  void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
-                      const std::function<std::string(int index)>& buttonLabel,
-                      const std::function<UIIcon(int index)>& rowIcon) const override;
   void drawTextField(const GfxRenderer& renderer, Rect rect, int textWidth, bool cursorMode = false,
                      int contentStartX = 0, int contentWidth = 0) const override;
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
-  bool homeMenuShowsContinueReading() const { return true; }
 };

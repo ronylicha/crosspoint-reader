@@ -1,4 +1,6 @@
-#include "CheckersActivity.h"
+#include "GamesConfig.h"
+
+#if CROSSPOINT_GAMES
 
 #include <GameSession.h>
 #include <GfxRenderer.h>
@@ -9,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "CheckersActivity.h"
 #include "PieceArt.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -849,3 +852,5 @@ void CheckersActivity::render(RenderLock&&) {
   renderCount++;
   renderer.displayBuffer(halfRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
 }
+
+#endif  // CROSSPOINT_GAMES

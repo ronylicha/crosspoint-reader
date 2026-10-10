@@ -4,6 +4,7 @@
 #include <I18n.h>
 
 #include "MappedInputManager.h"
+#include "components/AppNavigation.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 
@@ -51,7 +52,10 @@ NetworkModeSelectionActivity::NetworkModeSelectionActivity(GfxRenderer& renderer
 
 int NetworkModeSelectionActivity::listCount() const { return MENU_ITEM_COUNT; }
 
-const char* NetworkModeSelectionActivity::headerTitle() const { return tr(STR_FILE_TRANSFER); }
+void NetworkModeSelectionActivity::onEnter() {
+  UiListActivity::onEnter();
+  appnav::registerTabs(app, AppTab::Transfer);
+}
 
 void NetworkModeSelectionActivity::activateIndex(const int index) {
   // Selection leaves this screen; a lingering flash would gray an unrelated
@@ -64,8 +68,9 @@ void NetworkModeSelectionActivity::activateIndex(const int index) {
 
 void NetworkModeSelectionActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+  appnav::buildChrome(screen, renderer, AppTab::Transfer);
+  // Content below the app tab bar, above the button hints.
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(appnav::contentTop(renderer)), 0,
                                                 static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 

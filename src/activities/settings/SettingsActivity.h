@@ -17,6 +17,7 @@ enum class SettingAction {
   RemapFrontButtons,
   CustomiseStatusBar,
   ClockSettings,
+  DateTime,
   KOReaderSync,
   OPDSBrowser,
   Network,
@@ -224,7 +225,6 @@ class SettingsActivity final : public UiTabListActivity {
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 
-  void drawChrome() override;
   void drawFooter() override;
 
  public:
@@ -232,4 +232,5 @@ class SettingsActivity final : public UiTabListActivity {
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&& lock) override;
+  bool isModalActive() const override { return optionPopup.isActive(); }
 };

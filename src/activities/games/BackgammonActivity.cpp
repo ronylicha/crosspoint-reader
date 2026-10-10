@@ -1,4 +1,6 @@
-#include "BackgammonActivity.h"
+#include "GamesConfig.h"
+
+#if CROSSPOINT_GAMES
 
 #include <GameSession.h>
 #include <GfxRenderer.h>
@@ -10,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "BackgammonActivity.h"
 #include "PieceArt.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -1033,3 +1036,5 @@ void BackgammonActivity::render(RenderLock&&) {
   renderCount++;
   renderer.displayBuffer(halfRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
 }
+
+#endif  // CROSSPOINT_GAMES

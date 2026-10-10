@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ReadingLog.h>
+
 #include <atomic>
 #include <memory>
 #include <string>
@@ -18,6 +20,9 @@ class ReaderActivity : public Activity {
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};
   ReaderSession readerSession;
+  // Reading statistics: mutated on the render task and by notePageTurn, both
+  // under the render lock; flushed to READING_STATS on the main task.
+  readingstats::SessionTracker statsTracker;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
   void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
@@ -45,6 +50,10 @@ class ReaderActivity : public Activity {
   int getProgressPercent() const { return getScreenshotInfo().progressPercent; }
   virtual int getProgressBasisPoints() const { return getProgressPercent() * 100; }
 
+  // Chapter of the rendered page for the statistics' chapter count; -1 when
+  // the format has no chapters. Read on the render task.
+  virtual int statsChapterIndex() const { return -1; }
+
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
   virtual bool skipPages(int amount) { return pageTurn(amount > 0); }
@@ -64,6 +73,8 @@ class ReaderActivity : public Activity {
   void disableFastInitialRefresh();
   void notePageTurn(bool forward, bool succeeded);
   void flushReaderSession();
+  // Caller holds the render lock (onExit/prepareForSleep run under it).
+  void flushReadingStatsLocked();
 
  public:
   ~ReaderActivity() override = default;

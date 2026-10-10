@@ -53,6 +53,9 @@ class Activity {
   virtual bool handleForcedRefresh() { return false; }
   virtual bool isHomeActivity() const { return false; }
   virtual bool handleHomeGesture() { return false; }
+  // True while a modal popup owns input: global taps (the status band that
+  // opens the control center) must not reach behind it.
+  virtual bool isModalActive() const { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one
@@ -67,6 +70,6 @@ class Activity {
 
   // Convenience method to facilitate API transition to ActivityManager
   // TODO: remove this in near future
-  static void onGoHome(HomeMenuItem item = HomeMenuItem::NONE);
+  static void onGoHome(AppTab focusTab = AppTab::Home);
   static void onSelectBook(const std::string& path);
 };

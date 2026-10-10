@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "activities/UiListActivity.h"
+#include "components/AppNavigation.h"
 #include "components/OptionPopup.h"
 
 class FileBrowserActivity final : public UiListActivity {
@@ -53,15 +54,28 @@ class FileBrowserActivity final : public UiListActivity {
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   void onRowLongPress(int index) override;
-  // Long-press BACK goes to root; short Back goes up a directory (home/cancel at
-  // root), and Confirm activates on release while a hold opens file actions.
+  // Long-press BACK goes to root (Books mode); short Back goes up a directory
+  // (home/cancel at root), and Confirm activates on release while a hold opens
+  // file actions.
   bool handleCustomInput() override;
   bool handleButtons() override;
-  // Header shows the current folder name (battery indicator via GUI.drawHeader);
-  // footer labels depend on path depth and picker mode.
-  void drawChrome() override;
+  // PickFirmware keeps the titled header; Books builds its chrome in buildScreen.
+  const char* headerTitle() const override;
+  // Footer labels depend on path depth and picker mode.
   void drawFooter() override;
   void activateSelected();
+  // Climbs to the parent folder, selecting the folder just left.
+  void goUpFolder();
+
+  // Books mode: app tab bar + Library|Files sub-bar, then a folder row (back
+  // arrow on touch boards + folder name) inside sub-folders; tapping the row
+  // climbs one folder.
+  static constexpr freeink::ui::ActionId ACTION_FOLDER_UP = ACTION_USER;
+  static constexpr int FOLDER_ROW_HEIGHT = 48;
+  static constexpr int FOLDER_ARROW_GAP = 8;
+  void buildFolderRow(UiScreen& screen, int top);
+  static void onFolderUpAction(const freeink::ui::ActionEvent& event, void* user);
+  static void onSubBarAction(const freeink::ui::ActionEvent& event, void* user);
 
   // Data loading
   void loadFiles();
@@ -73,4 +87,5 @@ class FileBrowserActivity final : public UiListActivity {
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&& lock) override;
+  bool isModalActive() const override { return optionPopup.isActive(); }
 };

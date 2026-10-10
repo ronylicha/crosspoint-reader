@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Rtc.h>
 
+#include <ctime>
+
 class HalClock;
 extern HalClock halClock;  // Singleton
 
@@ -17,6 +19,9 @@ class HalClock {
   mutable unsigned long _lastPollMs = 0;
 
   static constexpr unsigned long CLOCK_POLL_MS = 10000;  // 10 seconds
+
+  // Writes a UTC epoch to the RTC and refreshes the read cache.
+  bool writeRtcUtc(time_t utc);
 
  public:
   // Call after BoardConfig has selected the active device.
@@ -33,6 +38,18 @@ class HalClock {
   // Current wall-clock time in the configured timezone.
   // Returns false if RTC is not available.
   bool localTime(struct tm& out) const;
+
+  // An RTC that lost power reports its reset epoch (often 2000-01-01); dates
+  // before this year are treated as "never set".
+  static constexpr int MIN_PLAUSIBLE_YEAR = 2024;
+
+  // localTime() restricted to a plausible (set) date.
+  bool plausibleLocalTime(struct tm& out) const { return localTime(out) && out.tm_year + 1900 >= MIN_PLAUSIBLE_YEAR; }
+
+  // Sets the wall clock from a local date and time (configured timezone):
+  // the system clock always, the RTC when present. Returns false when the
+  // date cannot be represented or the RTC write fails.
+  bool setLocalTime(struct tm local);
 
   // Get current local hour (0-23) and minute (0-59).
   // Returns false if RTC is not available.

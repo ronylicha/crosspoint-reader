@@ -16,11 +16,14 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "components/AppNavigation.h"
 #include "components/HeaderBackTapTarget.h"
+#if CROSSPOINT_GAMES
+#include "games/GamesMenuActivity.h"
+#endif
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
-#include "games/GamesMenuActivity.h"
 #include "library/LibraryListActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/UsbDriveActivity.h"
@@ -28,6 +31,7 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "stats/StatsActivity.h"
 #include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -118,13 +122,15 @@ void ActivityManager::loop() {
     // panels' etched glass makes unreliable). The reader keeps its clean page
     // (no status bar there to tap). Touch boards only, like the swipe itself.
     bool statusBarTap = false;
-    if (mappedInput.hasTouch() &&
-        (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
-         currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection")) {
+    const auto& name = currentActivity->name;
+    if (mappedInput.hasTouch() && !currentActivity->isModalActive() &&
+        (name == "Home" || name == "FileBrowser" || name == "Library" || name == "GamesMenu" || name == "Stats" ||
+         name == "Settings" || name == "NetworkModeSelection")) {
       int tx = 0;
       int ty = 0;
       // The header back button shares this band; its taps stay Back.
-      statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
+      statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < appnav::statusBandBottom() &&
+                     !HeaderBackTapTarget::contains(tx, ty);
     }
     if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
       haptic_feedback::touchAction();
@@ -274,15 +280,26 @@ void ActivityManager::goToUsbDrive() {
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToGames() {
-  replaceActivity(std::make_unique<GamesMenuActivity>(renderer, mappedInput));
+#if CROSSPOINT_GAMES
+void ActivityManager::goToGames() { replaceActivity(std::make_unique<GamesMenuActivity>(renderer, mappedInput)); }
+#endif
+
+void ActivityManager::goToStats() {
+  auto activity = makeUniqueNoThrow<StatsActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: stats activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
 }
 
 void ActivityManager::goToFileBrowser(std::string path) {
+  appnav::refreshLibraryCatalogEntry();
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 
 void ActivityManager::goToLibrary() {
+  appnav::refreshLibraryCatalogEntry();
   auto activity = makeUniqueNoThrow<LibraryListActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: library activity");
@@ -338,24 +355,25 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
   replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));
 }
 
-void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
-  if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
+void ActivityManager::goHome(AppTab focusTab, bool cleanInitialRefresh) {
+  if (focusTab == AppTab::Home && currentActivity) {
     const auto& activityName = currentActivity->name;
-    if (activityName == "FileBrowser") {
-      initialMenuItem = HomeMenuItem::FILE_BROWSER;
-    } else if (activityName == "Library") {
-      initialMenuItem = HomeMenuItem::LIBRARY;
-    } else if (activityName == "OpdsBookBrowser" || activityName == "PluginCatalog") {
-      initialMenuItem = HomeMenuItem::OPDS_BROWSER;
+    // The plugin catalog opens from the Library sub-bar (its third pill).
+    if (activityName == "FileBrowser" || activityName == "Library" || activityName == "OpdsBookBrowser" ||
+        activityName == "PluginCatalog") {
+      focusTab = AppTab::Library;
     } else if (activityName == "CrossPointWebServer") {
-      initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "GamesMenu" || activityName == "Chess" || activityName == "Checkers") {
-      initialMenuItem = HomeMenuItem::GAMES;
+      focusTab = AppTab::Transfer;
+    } else if (activityName == "GamesMenu" || activityName == "Chess" || activityName == "Checkers" ||
+               activityName == "Backgammon") {
+      focusTab = AppTab::Games;
+    } else if (activityName == "Stats") {
+      focusTab = AppTab::Stats;
     } else if (activityName == "Settings") {
-      initialMenuItem = HomeMenuItem::SETTINGS_MENU;
+      focusTab = AppTab::Settings;
     }
   }
-  replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh));
+  replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, focusTab, cleanInitialRefresh));
 }
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 

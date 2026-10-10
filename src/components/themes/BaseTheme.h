@@ -2,13 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <vector>
 
 class Bitmap;
 class GfxRenderer;
-struct RecentBook;
 namespace freeink {
 namespace ui {
 struct HeaderProps;
@@ -63,25 +61,15 @@ struct ThemeMetrics {
   bool headerShowsClock = true;
   // Clock slot: centered on the band, or on the left after the back arrow.
   bool headerClockCentered = true;
-  int menuRowHeight;
-  int menuSpacing;
 
   int tabSpacing;
   int tabBarHeight;
-  int coverGridTabBarHeight = 72;
   // Selected-tab pill fills its equal-width slot (legacy RoundedRaff tabs)
   // instead of shrinking to hug the label (legacy Lyra tabs).
   bool tabPillFullSlot = false;
 
   int scrollBarWidth;
   int scrollBarRightOffset;
-
-  int homeTopPadding;
-  int homeCoverHeight;
-  int homeCoverTileHeight;
-  int homeRecentBooksCount;
-  bool homeContinueReadingInMenu;
-  int homeMenuTopOffset;
 
   int buttonHintsHeight;
   int sideButtonHintsWidth;
@@ -178,18 +166,10 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .headerBatterySide = 0,
                                  // Corner clock: a centered clock would collide with the centered title.
                                  .headerClockCentered = false,
-                                 .menuRowHeight = 45,
-                                 .menuSpacing = 8,
                                  .tabSpacing = 10,
                                  .tabBarHeight = 50,
                                  .scrollBarWidth = 4,
                                  .scrollBarRightOffset = 5,
-                                 .homeTopPadding = 40,
-                                 .homeCoverHeight = 400,
-                                 .homeCoverTileHeight = 400,
-                                 .homeRecentBooksCount = 1,
-                                 .homeContinueReadingInMenu = false,
-                                 .homeMenuTopOffset = 10,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
@@ -250,10 +230,6 @@ class BaseTheme {
   static void drawHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int x, int boxWidth, int boxTop,
                             int boxHeight);
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
-  // Menu row height as DRAWN by drawButtonMenu. HomeActivity builds its touch
-  // grid from this, so hit bands always match the visuals (RoundedRaff derives
-  // its row height from the font, not the metrics table).
-  virtual int getMenuRowHeight(const GfxRenderer& renderer) const;
   // Also draws the wall clock opposite the battery when the user enabled
   // SETTINGS.clockShowInHeader and an RTC is present. On touch boards a
   // tappable back button leads the band (see HeaderBackTapTarget); root
@@ -272,12 +248,6 @@ class BaseTheme {
   static int headerStatusInset();
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
-  virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                                   const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
-                                   bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;
-  virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
-                              const std::function<std::string(int index)>& buttonLabel,
-                              const std::function<UIIcon(int index)>& rowIcon) const;
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   static void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
@@ -288,9 +258,6 @@ class BaseTheme {
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;
   virtual bool showsFileIcons() const { return false; }
-  // Thumb generation height for home covers; 0 means use metrics.homeCoverHeight.
-  // Themes with slots wider than 0.6 aspect override this so covers still fill.
-  virtual int homeCoverThumbHeight(const GfxRenderer&) const { return 0; }
 
   // Shared constants and helpers for battery drawing (used by all themes)
   static constexpr int batteryPercentSpacing = 4;

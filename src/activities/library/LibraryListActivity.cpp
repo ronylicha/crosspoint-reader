@@ -1,7 +1,6 @@
 #include "LibraryListActivity.h"
 
 #include <Epub.h>
-#include <FreeInkUIIcon.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -28,7 +27,7 @@
 #include "components/UITheme.h"
 #include "components/icons/headerIcons.h"
 #include "components/icons/listIcons.h"
-#include "components/icons/search32.h"
+#include "components/icons/search24.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
 
@@ -38,6 +37,16 @@ namespace {
 constexpr int SIDE_PADDING = 12;
 constexpr unsigned long LONG_PRESS_MS = 1000;
 constexpr int SCAN_YIELD_INTERVAL = 64;
+
+// Sub-bar trailing buttons, left to right. Search is always the outermost;
+// touch boards add Rebuild to its left.
+const freeink::Icon* const TOUCH_TRAILING_ICONS[] = {&icon_refresh_cw_24, &Search24Icon};
+const freeink::Icon* const BUTTON_TRAILING_ICONS[] = {&Search24Icon};
+constexpr int TOUCH_TRAILING_COUNT = 2;
+constexpr int BUTTON_TRAILING_COUNT = 1;
+constexpr int CONTEXT_ROW_PAD = 8;
+constexpr int TOUCH_CONTEXT_ROW_HEIGHT = 44;
+constexpr int BACK_ICON_GAP = 8;
 
 constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
@@ -133,9 +142,9 @@ void LibraryListActivity::onEnter() {
   // needs the card to itself.
   RenderLock lock(*this);
   UiTabListActivity::onEnter();
-  app.on(ACTION_SEARCH, &LibraryListActivity::searchActionTrampoline, this);
-  app.on(ACTION_REBUILD, &LibraryListActivity::rebuildActionTrampoline, this);
-  app.on(ACTION_BACK, &LibraryListActivity::backActionTrampoline, this);
+  appnav::registerTabs(app, AppTab::Library);
+  app.on(appnav::ACTION_APP_SUBBAR, &LibraryListActivity::subBarActionTrampoline, this);
+  app.on(ACTION_CONTEXT_BACK, &LibraryListActivity::contextBackTrampoline, this);
 
   // Recent is backed by the resident store. Prune before opening the index so
   // its persistence write never overlaps the long-lived index reader.
@@ -720,11 +729,11 @@ bool LibraryListActivity::readSeriesFolder(const int entry, std::string& name, u
 
 void LibraryListActivity::updateSeriesRange() {
   seriesFirst = seriesEnd = seriesMatchFirst = seriesMatchCount = 0;
-  headerSearchTitle = query.empty() ? std::string() : "“" + query + "”";
+  contextSearchTitle = query.empty() ? std::string() : "“" + query + "”";
   if (!seriesTabActive() || selectedSeriesGroup < 0) return;
   if (!query.empty()) {
-    headerSearchTitle = (selectedSeriesName.empty() ? std::string(tr(STR_LIBRARY_NO_SERIES)) : selectedSeriesName) +
-                        " — “" + query + "”";
+    contextSearchTitle = (selectedSeriesName.empty() ? std::string(tr(STR_LIBRARY_NO_SERIES)) : selectedSeriesName) +
+                         " — “" + query + "”";
   }
   const uint16_t first = index.seriesGroupStart(static_cast<uint16_t>(selectedSeriesGroup));
   const uint16_t end = index.seriesGroupStart(static_cast<uint16_t>(selectedSeriesGroup + 1));
@@ -806,7 +815,7 @@ void LibraryListActivity::leaveSeries() {
   selectedSeriesGroup = -1;
   selectedSeriesName.clear();
   seriesFirst = seriesEnd = seriesMatchFirst = seriesMatchCount = 0;
-  headerSearchTitle = query.empty() ? std::string() : "“" + query + "”";
+  contextSearchTitle = query.empty() ? std::string() : "“" + query + "”";
   shelfTop = -1;
   auto& nav = activeNav();
   nav = seriesFolderNav;
@@ -922,9 +931,9 @@ void LibraryListActivity::applyFilter() {
   filteredSeriesGroupCount = 0;
   seriesMatchFirst = seriesMatchCount = 0;
   filterFailed = false;
-  // The header shows the active query in place of the screen title, so the
-  // reader can see what narrowed the list without reopening the keyboard.
-  headerSearchTitle = query.empty() ? std::string() : "“" + query + "”";
+  // The context row shows the active query, so the reader can see what
+  // narrowed the list without reopening the keyboard.
+  contextSearchTitle = query.empty() ? std::string() : "“" + query + "”";
   if (query.empty()) {
     updateSeriesRange();
     return;
@@ -971,7 +980,7 @@ void LibraryListActivity::applyFilter() {
   updateSeriesRange();
 }
 
-// Staged back-out, shared by the Back button and the header's back arrow:
+// Staged back-out, shared by the Back button and the context row's back arrow:
 // clear the search, expand collapsed groups, return focus to the tabs, then
 // leave for home.
 void LibraryListActivity::handleBackAction() {
@@ -994,18 +1003,6 @@ void LibraryListActivity::handleBackAction() {
   } else {
     onGoHome();
   }
-}
-
-void LibraryListActivity::searchActionTrampoline(const fui::ActionEvent&, void* user) {
-  static_cast<LibraryListActivity*>(user)->openSearch();
-}
-
-void LibraryListActivity::backActionTrampoline(const fui::ActionEvent&, void* user) {
-  static_cast<LibraryListActivity*>(user)->handleBackAction();
-}
-
-void LibraryListActivity::rebuildActionTrampoline(const fui::ActionEvent&, void* user) {
-  static_cast<LibraryListActivity*>(user)->promptRebuildIndex();
 }
 
 // Title and author for one entry, read straight from the index. Only ever
@@ -1040,7 +1037,28 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
   return true;
 }
 
+void LibraryListActivity::subBarActionTrampoline(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<LibraryListActivity*>(user);
+  const int trailing = appnav::handleLibrarySubBarAction(event, appnav::LibrarySection::Books);
+  if (trailing < 0) return;
+  // Search is always the outermost trailing button.
+  const int searchIndex = (self->mappedInput.hasTouch() ? TOUCH_TRAILING_COUNT : BUTTON_TRAILING_COUNT) - 1;
+  if (trailing == searchIndex) {
+    self->openSearch();
+  } else {
+    self->promptRebuildIndex();
+  }
+}
+
+void LibraryListActivity::contextBackTrampoline(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<LibraryListActivity*>(user);
+  // The staged back-out may end on Home.
+  self->app.clearTapFlash();
+  self->handleBackAction();
+}
+
 bool LibraryListActivity::handleCustomInput() {
+  // The modal popup owns every input while open, chrome taps included.
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
   if (lockNextConfirmRelease && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -1459,51 +1477,19 @@ void LibraryListActivity::formatAuthorHeading(const std::string& author, std::st
   }
 }
 
-void LibraryListActivity::buildHeader(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto& theme = screen.theme();
-  fui::HeaderProps header;
-  header.title = headerTitle();
-  header.titleText = theme.titleText;
-  header.titleText.align = theme.headerTitleAlign;
-  header.sidePadding = theme.headerSidePadding;
-  header.minTouchSize = theme.minTouchSize;
-  header.styles = theme.popup;
-  if (header.styles.normal.border.kind == fui::PaintKind::None && theme.headerUnderline > 0) {
-    header.styles.normal.border = fui::Paint::solid(fui::Color::Black);
-    header.styles.normal.borderWidth = theme.headerUnderline;
-  }
-  header.trailingStyles = fui::plainStyles(fui::Paint::solid(fui::Color::Black));
-  header.borderEdges = fui::EdgeBottom;
-  // Same battery/clock band as every GUI.drawHeader screen; the header
-  // heights are unified across themes, so the buttons derive from the band.
-  GUI.applyHeaderStatus(renderer, header);
-  if (mappedInput.hasTouch()) {
-    header.leadingIcon = fui::bitmapFromIcon(icon_header_back_32);
-    header.leadingAction = ACTION_BACK;
-  }
-  // Search and refresh remain usable when classic sort ranks are degraded.
-  header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
-  header.trailingAction = ACTION_SEARCH;
-  if (mappedInput.hasTouch()) {
-    header.trailingAdjacentIcon = fui::bitmapFromIcon(icon_refresh_cw_32);
-    header.trailingAdjacentAction = ACTION_REBUILD;
-  }
-  const auto frameRect = screen.frame().screen();
-  // Header and tabs share a screen-relative boundary, independent of bezel insets.
-  fui::header(screen.frame(),
-              fui::Rect{frameRect.x, static_cast<int16_t>(metrics.topPadding), frameRect.width,
-                        static_cast<int16_t>(metrics.headerHeight)},
-              header);
-}
-
 void LibraryListActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   // The position readout owns the line above the hints; rows must not overlap
   // it.
   const int16_t readoutReserved = static_cast<int16_t>(renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing);
-  buildHeader(screen);
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+  appnav::buildChrome(screen, renderer, AppTab::Library);
+  const bool touch = mappedInput.hasTouch();
+  const int subBarBottom = appnav::buildLibrarySubBar(
+      screen, renderer, appnav::contentTop(renderer), appnav::LibrarySection::Books,
+      touch ? TOUCH_TRAILING_ICONS : BUTTON_TRAILING_ICONS, touch ? TOUCH_TRAILING_COUNT : BUTTON_TRAILING_COUNT);
+  // The sort strip starts below the context row.
+  const int contentTop = buildContextRow(screen, subBarBottom);
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(contentTop), 0,
                                                 static_cast<int16_t>(metrics.buttonHintsHeight + readoutReserved), 0});
 
   buildTabBar(screen);
@@ -1546,13 +1532,36 @@ void LibraryListActivity::drawPositionReadout() const {
   renderer.drawText(SMALL_FONT_ID, x, y, buf, true);
 }
 
-const char* LibraryListActivity::headerTitle() const {
-  if (!headerSearchTitle.empty()) return headerSearchTitle.c_str();
+// The series folder level needs no row: the active Series strip tab names it.
+const char* LibraryListActivity::contextTitle() const {
+  if (!contextSearchTitle.empty()) return contextSearchTitle.c_str();
   if (seriesTabActive()) {
-    if (seriesFoldersVisible()) return tr(STR_LIBRARY_SERIES_TAB);
+    if (seriesFoldersVisible()) return nullptr;
     return selectedSeriesName.empty() ? tr(STR_LIBRARY_NO_SERIES) : selectedSeriesName.c_str();
   }
-  return activeSortDegraded() ? tr(STR_LIBRARY_TITLE_UNSORTED) : tr(STR_LIBRARY);
+  return activeSortDegraded() ? tr(STR_LIBRARY_TITLE_UNSORTED) : nullptr;
+}
+
+int LibraryListActivity::buildContextRow(UiScreen& screen, const int top) {
+  const char* title = contextTitle();
+  if (!title) return top;
+  const bool touch = mappedInput.hasTouch();
+  fui::TextStyle style = screen.theme().bodyText;
+  style.bold = true;
+  style.maxLines = 1;
+  const int textRow = screen.target().lineHeight(style.font) + 2 * CONTEXT_ROW_PAD;
+  const auto height = static_cast<int16_t>(touch ? std::max(textRow, TOUCH_CONTEXT_ROW_HEIGHT) : textRow);
+  const auto width = static_cast<int16_t>(renderer.getScreenWidth());
+  const auto y = static_cast<int16_t>(top);
+  // The whole row is the back target, not just its arrow.
+  screen.frame().hit(fui::Rect{0, y, width, height}, ACTION_CONTEXT_BACK, 0, fui::InputTouch);
+  int16_t textX = SIDE_PADDING;
+  if (touch) {
+    appnav::paintIcon(screen.target(), icon_header_back_32, textX, y + (height - icon_header_back_32.h) / 2);
+    textX = static_cast<int16_t>(textX + icon_header_back_32.w + BACK_ICON_GAP);
+  }
+  screen.target().text(fui::Rect{textX, y, static_cast<int16_t>(width - textX - SIDE_PADDING), height}, title, style);
+  return top + height;
 }
 
 void LibraryListActivity::drawHoldHelp() const {
@@ -1577,7 +1586,6 @@ void LibraryListActivity::render(RenderLock&& lock) {
     // Repaint the shelf before a resized dialog so its previous border and
     // text cannot remain outside the next dialog's smaller rectangle.
     renderer.clearScreen();
-    drawChrome();
     renderUi();
     drawFooter();
     optionPopup.processRender(renderer, mappedInput);

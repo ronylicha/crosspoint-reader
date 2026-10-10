@@ -24,9 +24,11 @@ class UiAppHost {
   // One shared instantiation for every FUI screen (the largest of the sizes
   // the screens used to pick individually): FreeInkApp, Screen and Frame are
   // capacity-templated, so per-screen capacities each minted a fresh copy of
-  // that code in flash. The wider interaction buffer costs ~300 bytes of RAM
-  // per live host, bounded by the activity stack depth.
-  using UiApp = freeink::ui::FreeInkApp<24, 6>;
+  // that code in flash. Root screens add the app tab bar (6 tabs) and a
+  // sub-bar (up to 5 pills/buttons) to their own elements — the library
+  // shelves alone register 16 — hence 40. Each interaction slot is a few
+  // bytes per published generation, bounded by the activity stack depth.
+  using UiApp = freeink::ui::FreeInkApp<40, 8>;
   using UiScreen = UiApp::ScreenType;
 
   explicit UiAppHost(const GfxRenderer& renderer);

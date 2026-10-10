@@ -18,6 +18,7 @@
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "CrossPointSettings.h"
+#include "DateTimeSettingsActivity.h"
 #include "FontDownloadActivity.h"
 #include "HomeButtonSettingsActivity.h"
 #include "KOReaderSettingsActivity.h"
@@ -35,6 +36,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "components/AppNavigation.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
@@ -46,6 +48,10 @@ SettingsActivity::SettingsActivity(GfxRenderer& renderer, MappedInputManager& ma
     : UiTabListActivity("Settings", renderer, mappedInput) {}
 
 void SettingsActivity::rebuildSettingsLists() {
+  // The lists and rowItems_/rowValues_ back the list the render task draws;
+  // every caller (onEnter, tab and popup callbacks, result handlers) runs on
+  // the loop task without the lock.
+  RenderLock lock(*this);
   displaySettings.clear();
   readerSettings.clear();
   controlsSettings.clear();
@@ -97,10 +103,13 @@ void SettingsActivity::rebuildSettingsLists() {
                             SettingInfo::Action(StrId::STR_HOME_BUTTON, SettingAction::HomeButton));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
-  // Clock configuration only exists where the RTC probe found hardware; on
-  // clockless boards there is nothing to set.
+  // The full clock screen needs the RTC; clockless boards still get the
+  // manual date and time (system clock, kept across reboots by the trusted
+  // time floor) so daily statistics can work.
   if (halClock.isAvailable()) {
     systemSettings.push_back(SettingInfo::Action(StrId::STR_CLOCK, SettingAction::ClockSettings));
+  } else {
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_TIME, SettingAction::DateTime));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
@@ -140,6 +149,7 @@ void SettingsActivity::rebuildSettingsLists() {
 
 void SettingsActivity::onEnter() {
   UiTabListActivity::onEnter();
+  appnav::registerTabs(app, AppTab::Settings);
 
   // Reset selection to first category (ring position 0, the tab bar, comes
   // from the base's per-tab nav reset)
@@ -153,6 +163,7 @@ void SettingsActivity::onEnter() {
 }
 
 void SettingsActivity::selectCategory(const int categoryIndex) {
+  RenderLock lock(*this);  // see rebuildSettingsLists()
   selectedCategoryIndex = categoryIndex;
   switch (selectedCategoryIndex) {
     case 0:
@@ -234,6 +245,7 @@ void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valueP
 }
 
 bool SettingsActivity::handleCustomInput() {
+  // The modal popup owns every input while open, taps on the tab bar included.
   return optionPopup.handleInput(mappedInput, [this] { requestUpdate(); });
 }
 
@@ -366,6 +378,13 @@ void SettingsActivity::toggleCurrentSetting() {
           startActivityForResult(std::move(activity), resultHandler);
         } else {
           LOG_ERR("SETTINGS", "OOM: ClockSettingsActivity");
+        }
+        break;
+      case SettingAction::DateTime:
+        if (auto activity = makeUniqueNoThrow<DateTimeSettingsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), resultHandler);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: DateTimeSettingsActivity");
         }
         break;
       case SettingAction::KOReaderSync:
@@ -539,8 +558,10 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
 
 void SettingsActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+  appnav::buildChrome(screen, renderer, AppTab::Settings);
+  // Content below the app tab bar, above the button hints; the category tabs
+  // form the sub-bar at the top of that band.
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(appnav::contentTop(renderer)), 0,
                                                 static_cast<int16_t>(metrics.buttonHintsHeight), 0});
 
   buildTabBar(screen);
@@ -582,18 +603,6 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
   props.labelText.maxLines = 2;
   syncTabListViewport(screen, props);
   screen.list(props);
-}
-
-void SettingsActivity::drawChrome() {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-
-  // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
-  // indicator; the rest of the screen renders through the app.
-  // Version rides in the header's trailing label slot: the footer position
-  // conflicts with button hints on non-touch devices.
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
-                 CROSSPOINT_VERSION);
 }
 
 void SettingsActivity::drawFooter() {

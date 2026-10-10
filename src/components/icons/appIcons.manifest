@@ -1,0 +1,25 @@
+# Manifest for src/components/icons/appIcons.h — regenerate from the repository root with:
+#   python3 freeink-sdk/libs/assets/Icons/tools/gen_icons.py \
+#     --manifest src/components/icons/appIcons.manifest \
+#     --svgdir freeink-sdk/libs/assets/Icons/lucide/icons \
+#     --sizes 24,32,48 --out src/components/icons/appIcons.h
+# then run ./bin/clang-format-fix -g.
+#
+# Stock Lucide icons only: app tab bar, reading statistics and games menu.
+# The checkers piece is not a Lucide icon; it lives in gameCustomIcons.manifest.
+app-home = house
+app-library = library
+app-games = gamepad-2
+app-transfer = smartphone-nfc
+app-stats = chart-line
+app-settings = sliders-horizontal
+trend-up = trending-up
+trend-down = trending-down
+stat-time = clock
+stat-pages = book-open
+stat-chapters = layers
+stat-pace = timer
+stat-streak = flame
+stat-finished = book-check
+game-chess = chess-knight
+game-backgammon = dices

@@ -10,14 +10,14 @@
 #include <string>
 #include <vector>
 
+#include "AppTab.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "games/GamesConfig.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
-
-enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, GAMES, SETTINGS_MENU };
 
 /**
  * ActivityManager
@@ -85,7 +85,10 @@ class ActivityManager {
   void goToJoinNetwork();  // File Transfer straight into Join Network (post heap-defrag reboot)
   void goToUsbDrive();
   void goToSettings();
+#if CROSSPOINT_GAMES
   void goToGames();
+#endif
+  void goToStats();
   void goToFileBrowser(std::string path = {});
   void goToLibrary();
   void goToBrowser();
@@ -95,7 +98,9 @@ class ActivityManager {
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
-  void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE, bool cleanInitialRefresh = false);
+  // focusTab puts the Home button cursor on that tab of the bar; AppTab::Home
+  // derives it from the screen being left (its tab), or the books otherwise.
+  void goHome(AppTab focusTab = AppTab::Home, bool cleanInitialRefresh = false);
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);

@@ -15,6 +15,7 @@
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
@@ -50,8 +51,16 @@ void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(r
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
 void ReaderActivity::notePageTurn(const bool forward, const bool succeeded) {
-  RenderLock lock(*this);
-  readerSession.noteTurn(forward, succeeded);
+  readingstats::Activity due;
+  {
+    RenderLock lock(*this);
+    readerSession.noteTurn(forward, succeeded);
+    statsTracker.noteTurn(forward, succeeded);
+    if (statsTracker.shouldFlush()) due = statsTracker.takePending();
+  }
+  // Periodic flush bounds what a crash or a pulled battery can lose; the SD
+  // write runs outside the lock so the page render is not held up.
+  READING_STATS.record(bookPath, due);
 }
 
 void ReaderActivity::onEnter() {
@@ -107,6 +116,7 @@ void ReaderActivity::onExit() {
   // Flush BEFORE the ReaderExit event: the session's final progress must be
   // durable before a subscriber can act on the exit notification.
   flushReaderSession();
+  flushReadingStatsLocked();
 
   if (pluginevents::anySubscriber(pluginevents::Event::ReaderExit)) {
     char percent[8];
@@ -123,7 +133,14 @@ void ReaderActivity::onExit() {
   endOfBookOptionsReady.store(false, std::memory_order_release);
 }
 
-void ReaderActivity::prepareForSleep() { flushReaderSession(); }
+void ReaderActivity::prepareForSleep() {
+  flushReaderSession();
+  flushReadingStatsLocked();
+}
+
+void ReaderActivity::flushReadingStatsLocked() {
+  if (statsTracker.hasPending()) READING_STATS.record(bookPath, statsTracker.takePending());
+}
 
 void ReaderActivity::flushReaderSession() {
   if (!readerSession.isEmitWorthy() || !pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
@@ -258,11 +275,14 @@ void ReaderActivity::render(RenderLock&&) {
     onEndOfBookRendered();
     markPageRendered();
     readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+    statsTracker.onPageRendered(millis(), -1);
+    statsTracker.noteFinished();
     return;
   }
 
   renderBook();
   readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+  statsTracker.onPageRendered(millis(), statsChapterIndex());
 }
 
 bool ReaderActivity::handleForcedRefresh() {

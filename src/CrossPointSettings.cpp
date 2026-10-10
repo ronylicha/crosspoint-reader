@@ -16,6 +16,12 @@
 #include "fontIds.h"
 #include "util/ParagraphIndentMigration.h"
 
+static_assert(CrossPointSettings::legacyUiTheme(0) == CrossPointSettings::CLASSIC);
+static_assert(CrossPointSettings::legacyUiTheme(1) == CrossPointSettings::LYRA);
+static_assert(CrossPointSettings::legacyUiTheme(2) == CrossPointSettings::LYRA);  // Lyra Extended
+static_assert(CrossPointSettings::legacyUiTheme(3) == CrossPointSettings::ROUNDEDRAFF);
+static_assert(CrossPointSettings::legacyUiTheme(4) == CrossPointSettings::LYRA);  // Cover Grid
+
 namespace {
 
 // Stack buffer for "<key>_obf" key construction — avoids a std::string
@@ -259,6 +265,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
+  }
+
+  // Files written before "uiStyle" carry the theme under "uiTheme", numbered
+  // with the retired home-only variants.
+  if (!doc["uiStyle"].is<uint8_t>() && doc["uiTheme"].is<uint8_t>()) {
+    uiTheme = legacyUiTheme(doc["uiTheme"].as<uint8_t>());
+    needsResave = true;
   }
 
   // Absent means unconfigured, which is the default.

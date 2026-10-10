@@ -181,8 +181,13 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LONG_PRESS_BUTTON_BEHAVIOR_COUNT
   };
 
-  // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4 };
+  // UI Theme, persisted under "uiStyle". The legacy "uiTheme" key also
+  // numbered two home-only variants (Lyra Extended = 2, Cover Grid = 4) that
+  // the shared tab-bar home replaced; legacyUiTheme() maps them onto Lyra.
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, ROUNDEDRAFF = 2, UI_THEME_COUNT };
+  static constexpr uint8_t legacyUiTheme(const uint8_t legacy) {
+    return legacy == 0 ? CLASSIC : (legacy == 3 ? ROUNDEDRAFF : LYRA);
+  }
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };

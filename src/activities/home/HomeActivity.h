@@ -1,99 +1,103 @@
 #pragma once
-#include <functional>
+#include <ReadingLog.h>
+
+#include <array>
+#include <memory>
+#include <string>
 #include <vector>
 
-#include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
-#include "components/CoverGridHomeUi.h"
+#include "components/AppNavigation.h"
+#include "components/HomeCoverCache.h"
+#include "components/UiAppHost.h"
+#include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
 
-struct Rect;
-
-class HomeActivity final : public Activity {
-  std::unique_ptr<CoverGridHomeUi> coverGridUi;
-  ButtonNavigator buttonNavigator;
-  int selectorIndex = 0;
-  bool recentsLoading = false;
-  bool recentsLoaded = false;
-  bool firstRenderDone = false;
-  bool hasOpdsServers = false;
-  bool hasPlugins = false;
-  // The home "library" slot (index 2) shows Plugins when any plugin is
-  // installed, otherwise OPDS. The index converters gate on its presence.
-  bool hasLibrarySlot() const { return hasPlugins || hasOpdsServers; }
-  bool hasContinueReading = false;
-  bool coverRendered = false;      // Track if cover has been rendered once
-  bool coverBufferStored = false;  // Track if cover buffer is stored
-  uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
-  size_t coverBufferSize = 0;      // Bytes allocated to coverBuffer
-  // Logical rect last passed to drawRecentBookCover. The cover snapshot only
-  // needs to cover this region, not the entire framebuffer, so we cache the
-  // tile instead of all 48 KB. Set in render() before the call.
-  int coverRectX = 0;
-  int coverRectY = 0;
-  int coverRectW = 0;
-  int coverRectH = 0;
-  std::vector<RecentBook> recentBooks;
-  const HomeMenuItem initialMenuItem;
-  const bool cleanInitialRefresh;
-
-  // Convert HomeMenuItem to menu index (used in onEnter)
-  static int menuItemToIndex(HomeMenuItem item, bool hasOpdsUrl) {
-    int i = 0;
-    if (item == HomeMenuItem::FILE_BROWSER) return i;
-    ++i;
-    if (item == HomeMenuItem::LIBRARY) return i;
-    ++i;
-    if (item == HomeMenuItem::OPDS_BROWSER) return hasOpdsUrl ? i : 0;
-    if (hasOpdsUrl) ++i;
-    if (item == HomeMenuItem::FILE_TRANSFER) return i;
-    ++i;
-    if (item == HomeMenuItem::GAMES) return i;
-    ++i;
-    if (item == HomeMenuItem::SETTINGS_MENU) return i;
-    return 0;
-  }
-
-  // Convert menu index to HomeMenuItem (used in loop)
-  static HomeMenuItem indexToMenuItem(int idx, bool hasOpdsUrl) {
-    int i = 0;
-    if (idx == i++) return HomeMenuItem::FILE_BROWSER;
-    if (idx == i++) return HomeMenuItem::LIBRARY;
-    if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
-    if (idx == i++) return HomeMenuItem::FILE_TRANSFER;
-    if (idx == i++) return HomeMenuItem::GAMES;
-    if (idx == i) return HomeMenuItem::SETTINGS_MENU;
-    return HomeMenuItem::NONE;
-  }
-  void onSelectBook(const std::string& path);
-  void onFileBrowserOpen();
-  void onLibraryOpen();
-  void onSettingsOpen();
-  void onGamesOpen();
-  void onFileTransferOpen();
-  void onOpdsBrowserOpen();
-  void onPluginsOpen();
-
-  int getMenuItemCount() const;
-  bool storeCoverBuffer();    // Store frame buffer for cover image
-  bool restoreCoverBuffer();  // Restore frame buffer from stored cover
-  void freeCoverBuffer();     // Free the stored cover buffer
-  void loadRecentBooks(int maxBooks);
-  void loadRecentCovers(int coverHeight);
-  void fillCoverGridFromLibrary();
-  void resolveGridCoverPaths();
-  void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
-
+// Home tab: the current book beside today's reading figures, a seven-day
+// chart and the next recent books, under the app tab bar.
+//
+// Built with FreeInkUI: the tab bar, book tiles, chart and "set the date"
+// link register their taps in the app's interaction table.
+// Buttons: side Up/Down walk the books, front Left/Right walk the tab bar,
+// Confirm opens, Back resumes the last book.
+class HomeActivity final : public Activity, private UiAppHost {
  public:
-  explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                        HomeMenuItem initialMenuItemValue = HomeMenuItem::NONE, bool cleanInitialRefresh = false)
+  static constexpr int MAX_ROWS = 3;
+  static constexpr int MAX_BOOKS = 1 + MAX_ROWS;
+
+  explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, AppTab focusTab = AppTab::Home,
+                        bool cleanInitialRefresh = false)
       : Activity("Home", renderer, mappedInput),
-        initialMenuItem(initialMenuItemValue),
+        UiAppHost(renderer),
+        focusTab(focusTab),
         cleanInitialRefresh(cleanInitialRefresh) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
   bool isHomeActivity() const override { return true; }
+
+ private:
+  struct Layout {
+    Rect hero;
+    Rect heroCover;
+    Rect heroFigures;
+    Rect heroCaption;  // title and progress under the cover
+    Rect chart;
+    std::array<Rect, MAX_ROWS> rows;
+    int rowCount = 0;
+  };
+  // Today's figures, snapshotted on enter so render never touches the store.
+  struct TodayFigures {
+    bool dated = false;
+    uint32_t seconds = 0;
+    int32_t secondsDelta = 0;
+    uint32_t pages = 0;
+    int32_t pagesDelta = 0;
+    uint32_t streak = 0;
+    uint32_t finished = 0;
+    uint32_t finishedToday = 0;
+    readingstats::DayTotals week[7]{};
+  };
+
+  // Same geometry for render (drawing) and loop (hit tests).
+  Layout computeLayout() const;
+  int bookSlots(const Layout& layout) const;
+
+  void loadBooks();
+  void loadFigures();
+  void prepareCovers(const Layout& layout);
+  bool ensureThumb(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
+
+  // Hero and rows paint covers through the cache, hence non-const.
+  void drawHero(const Layout& layout);
+  void drawChart(const Layout& layout) const;
+  void drawRow(const Layout& layout, int row);
+  void drawFocus(const Rect& rect) const;
+  void drawCover(const Rect& rect, size_t index);
+
+  static void screenFn(UiScreen& screen, void* user);
+  void buildScreen(UiScreen& screen);
+  static void onOpenBook(const freeink::ui::ActionEvent& event, void* user);
+  static void onOpenStats(const freeink::ui::ActionEvent& event, void* user);
+  static void onSetDate(const freeink::ui::ActionEvent& event, void* user);
+  void openDateSettings();
+
+  void activate(int selection, const Layout& layout);
+  void openBook(size_t index);
+
+  std::unique_ptr<HomeCoverCache> coverCache;
+  ButtonNavigator buttonNavigator;
+  std::vector<RecentBook> books;
+  std::array<int, MAX_BOOKS> progress{};
+  std::array<bool, MAX_BOOKS> finished{};
+  std::array<std::string, MAX_BOOKS> coverPaths;
+  TodayFigures figures;
+  int selection = 0;
+  int preparedHeroHeight = 0;
+  bool coversReady = false;
+  bool firstRenderDone = false;
+  const AppTab focusTab;
+  const bool cleanInitialRefresh;
 };

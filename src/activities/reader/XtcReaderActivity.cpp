@@ -70,6 +70,15 @@ void XtcReaderActivity::renderBook() {
   saveProgress();
 }
 
+int XtcReaderActivity::statsChapterIndex() const {
+  if (!xtc || !xtc->hasChapters()) return -1;
+  const auto& chapters = xtc->getChapters();
+  for (size_t i = 0; i < chapters.size(); ++i) {
+    if (currentPage >= chapters[i].startPage && currentPage <= chapters[i].endPage) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 XtcReaderActivity::StatusBarInfo XtcReaderActivity::getStatusBarInfo() const {
   const auto sb = SETTINGS.statusBarSpec();
   const int bookPageCount = static_cast<int>(xtc->getPageCount());

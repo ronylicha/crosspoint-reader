@@ -15,7 +15,7 @@ enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_DRIV
  * The onModeSelected callback is called with the user's choice.
  * The onCancel callback is called if the user presses back.
  *
- * The header stays on GUI.drawHeader for the battery indicator.
+ * It is the Transfer root screen, so it draws the app tab bar (AppNavigation).
  */
 class NetworkModeSelectionActivity final : public UiListActivity {
  public:
@@ -27,6 +27,7 @@ class NetworkModeSelectionActivity final : public UiListActivity {
   static constexpr int MENU_ITEM_COUNT = 3;
 #endif
 
+  void onEnter() override;
   void onModeSelected(NetworkMode mode);
   void onCancel();
 
@@ -35,7 +36,6 @@ class NetworkModeSelectionActivity final : public UiListActivity {
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   void onBackButton() override { onCancel(); }
-  const char* headerTitle() const override;
 
   // Row storage: entirely static (label/subtitle/icon never change), so it's
   // built once in the constructor instead of every buildScreen() call, into
