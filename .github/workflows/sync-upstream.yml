@@ -1,8 +1,9 @@
 name: Sync upstream CrossPoint release
 
 # Vérifie chaque jour si une nouvelle release officielle de CrossPoint Reader
-# est sortie. Si oui : merge de l'upstream dans develop, build du firmware
-# X4 Pro, puis publication d'une release v<version>-games.N avec le .bin.
+# est sortie. Si oui : merge de l'upstream dans develop, build des firmwares
+# X4 Pro (tactile, avec les jeux) et X4/X3 (boutons, sans les jeux), puis
+# publication d'une release v<version>-games.N avec les deux .bin.
 # Déclenchement manuel possible depuis l'onglet Actions (workflow_dispatch).
 
 on:
@@ -18,6 +19,11 @@ on:
 permissions:
   contents: write
   issues: write
+
+# Deux exécutions simultanées publieraient deux fois la même version.
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -41,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ inputs.force_version }}
         run: |
-          set -e
+          set -euo pipefail
           git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git || true
           git fetch upstream --tags
 
@@ -51,21 +57,29 @@ jobs:
             # releases/latest = dernière release non-prerelease de l'upstream
             UPSTREAM_TAG=$(gh api repos/crosspoint-reader/crosspoint-reader/releases/latest --jq .tag_name)
           fi
+          # Les tags upstream sont nus (1.6.5) ; tolérer un éventuel préfixe v.
+          UPSTREAM_VERSION="${UPSTREAM_TAG#v}"
           echo "Dernière release officielle : $UPSTREAM_TAG"
-          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
 
           # Dernière version upstream déjà intégrée au fork (tags vX.Y.Z-games.N)
           LAST=$(git tag -l 'v*-games.*' | sed 's/^v//; s/-games\./ /' | sort -V -k1,1 -k2,2n | tail -1 | cut -d' ' -f1)
           echo "Dernière base intégrée : ${LAST:-aucune}"
 
+          # Les étapes suivantes tournent dans d'autres shells : tout passe par GITHUB_ENV.
+          {
+            echo "UPSTREAM_TAG=$UPSTREAM_TAG"
+            echo "UPSTREAM_VERSION=$UPSTREAM_VERSION"
+            echo "LAST=$LAST"
+          } >> "$GITHUB_ENV"
+
       - name: Vérifier si une resynchronisation est nécessaire
         id: check
         run: |
-          if [ -n "$LAST" ] && [ "$(printf '%s\n%s\n' "$LAST" "$UPSTREAM_TAG" | sort -V | tail -1)" = "$LAST" ]; then
-            echo "Le fork est déjà à jour ($LAST >= $UPSTREAM_TAG). Rien à faire."
+          if [ -n "$LAST" ] && [ "$(printf '%s\n%s\n' "$LAST" "$UPSTREAM_VERSION" | sort -V | tail -1)" = "$LAST" ]; then
+            echo "Le fork est déjà à jour ($LAST >= $UPSTREAM_VERSION). Rien à faire."
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Nouvelle release officielle détectée : $UPSTREAM_TAG"
+            echo "Nouvelle release officielle détectée : $UPSTREAM_VERSION"
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -88,7 +102,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > /tmp/issue.md <<EOF
-          La synchronisation automatique avec la release officielle **${UPSTREAM_TAG}** a échoué (conflits de merge, probablement dans HomeActivity/ActivityManager ou les fichiers i18n).
+          La synchronisation automatique avec la release officielle **${UPSTREAM_TAG}** a échoué (conflits de merge ou build).
+
+          Zones du fork les plus exposées : barre d'onglets et accueil (\`src/components/AppNavigation.*\`, \`src/activities/home/\`), thèmes (\`src/components/themes/\`), bibliothèque (\`src/activities/library/\`), réglages (\`src/activities/settings/\`, \`src/CrossPointSettings.*\`), lecteur (\`src/activities/reader/ReaderActivity.*\`) et fichiers i18n.
 
           À faire manuellement :
           \`\`\`bash
@@ -96,10 +112,10 @@ jobs:
           git fetch https://github.com/crosspoint-reader/crosspoint-reader.git --tags
           git merge ${UPSTREAM_TAG}
           # résoudre les conflits, puis :
-          pio run -e x4pro
+          pio run -e x4pro -e gh_release
           \`\`\`
           EOF
-          gh issue create --title "⚠️ Conflit de merge avec CrossPoint $UPSTREAM_TAG" --body-file /tmp/issue.md || true
+          gh issue create --title "⚠️ Synchronisation avec CrossPoint $UPSTREAM_TAG en échec" --body-file /tmp/issue.md || true
           exit 1
 
       - name: Cache PlatformIO
@@ -110,12 +126,17 @@ jobs:
           key: pio-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-
 
-      - name: Build du firmware X4 Pro
+      - name: Build des firmwares X4 Pro et X4/X3
         if: steps.check.outputs.needed == 'true'
         run: |
+          set -e
           pip install platformio pyyaml
-          pio run -e x4pro
-          ls -la .pio/build/x4pro/firmware.bin
+          # x4pro : tactile, avec les jeux. gh_release : X4/X3 à boutons, sans les jeux.
+          pio run -e x4pro -e gh_release
+          mkdir -p dist
+          cp .pio/build/x4pro/firmware.bin dist/firmware-x4pro-jeux.bin
+          cp .pio/build/gh_release/firmware.bin dist/firmware-x4.bin
+          ls -la dist
 
       - name: Tag et release
         if: steps.check.outputs.needed == 'true'
@@ -127,32 +148,19 @@ jobs:
 
           # Itération : -games.1 sauf si le tag existe déjà (-> .2, .3...)
           N=1
-          while git rev-parse -q --verify "refs/tags/v${UPSTREAM_TAG}-games.${N}" >/dev/null; do N=$((N+1)); done
-          TAG="v${UPSTREAM_TAG}-games.${N}"
+          while git rev-parse -q --verify "refs/tags/v${UPSTREAM_VERSION}-games.${N}" >/dev/null; do N=$((N+1)); done
+          TAG="v${UPSTREAM_VERSION}-games.${N}"
           git tag "$TAG"
           git push origin "$TAG"
 
-          cat > /tmp/notes.md <<EOF
-          Fork CrossPoint Reader + Jeux pour **Xteink X4 Pro**, resynchronisé sur la release officielle **${UPSTREAM_TAG}**.
-
-          ## Contenu du fork
-          - Menu **Jeux** sur l'écran d'accueil
-          - **Échecs** : 2 joueurs ou contre l'IA — silhouettes standard, promotion au choix (dame/cavalier/tour/fou), IA alpha-bêta
-          - **Dames internationales 10×10** : 2 joueurs ou contre l'IA — prise majoritaire, rafles, dames volantes, couronne, IA alpha-bêta
-          - **Backgammon** : 2 joueurs ou contre l'IA — doublets, barre, sortie des pions, IA par énumération des séquences
-          - Interface tactile + boutons, traductions FR/EN
-
-          ## Installation
-          1. Téléchargez \`firmware-x4pro-jeux.bin\` ci-dessous
-          2. Renommez-le en \`firmware.bin\`, copiez-le à la racine de la carte SD
-          3. Réglages → Mise à jour du firmware par carte SD
-
-          ⚠️ Xteink X4 Pro uniquement (ESP32-S3).
-          EOF
+          # Même description du fork que les releases publiées à la main.
+          export UPSTREAM_VERSION
+          envsubst '${UPSTREAM_VERSION}' < .github/release-notes-fork.md > /tmp/notes.md
 
           gh release create "$TAG" \
             --repo ronylicha/crosspoint-reader \
             --target develop \
-            --title "v${UPSTREAM_TAG}-games.${N} — Échecs, Dames & Backgammon (X4 Pro)" \
+            --title "${TAG} — Interface à onglets, statistiques, bibliothèque et jeux" \
             --notes-file /tmp/notes.md \
-            ".pio/build/x4pro/firmware.bin#firmware-x4pro-jeux.bin"
+            dist/firmware-x4pro-jeux.bin \
+            dist/firmware-x4.bin
