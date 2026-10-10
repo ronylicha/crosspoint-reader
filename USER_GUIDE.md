@@ -37,6 +37,7 @@ Welcome to the **CrossPoint** firmware. This guide outlines the hardware control
       - [Cover settings](#cover-settings)
       - [Custom images](#custom-images)
     - [3.8 Custom Fonts (SD Card)](#38-custom-fonts-sd-card)
+    - [3.9 Reading Statistics](#39-reading-statistics)
   - [4. Reading Mode](#4-reading-mode)
     - [Page Turning](#page-turning)
     - [Chapter Navigation](#chapter-navigation)
@@ -107,7 +108,15 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 ### 3.1 Home Screen
 
-The Home screen is the main entry point to the firmware. From here you can navigate to **[Reading Mode](#4-reading-mode)** with the most recently read book, **[Browse Files](#33-browse-files-screen)**, the **[Library](#34-library-screen)**, **[File Transfer](#35-file-transfer-screen)**, or **[Settings](#36-settings)**.
+Every top-level screen shares an icon tab bar under the clock and battery: **Home**, **Library**, **Games**, **File Transfer**, **[Statistics](#39-reading-statistics)** and **[Settings](#36-settings)**. The underlined icon is the current screen; tap another icon to switch. The Library tab opens a second bar with **Library** (selected) and **Files** ([Browse Files](#33-browse-files-screen)), plus **Catalogs** once an [OPDS server](#365-opds-servers-multiple-libraries) is configured. Settings keeps its Display, Reader, Controls and System bar under the tab bar.
+
+The Home screen is the main entry point to the firmware:
+
+* **Current book tile:** the cover, title and progress of the most recently read book, beside today's reading figures — reading time, pages, day streak and books finished. An arrow shows whether today is ahead of or behind yesterday, with the difference. Opening the tile resumes the book.
+* **Last 7 days:** reading time per day, today in black, with the week's total. Tap it to open the Statistics tab.
+* **Recent books:** the next books read, with their author, progress, or **Completed**.
+
+On button devices, the side buttons move between the books, front **Left**/**Right** walk the tab bar, and **Confirm** opens the selection. **Back** resumes the last book. On other top-level screens, **Back** returns Home.
 
 ### 3.2 Reading Mode
 
@@ -115,7 +124,7 @@ See [Reading Mode](#4-reading-mode) below for more information.
 
 ### 3.3 Browse Files Screen
 
-The Browse Files screen acts as a file and folder browser. The full path to the current directory is shown at the top of the screen. File extensions are displayed alongside each filename, and directories are shown with brackets (e.g. `[folder-name]`). Hidden directories (those beginning with `.`) are also visible.
+The Browse Files screen acts as a file and folder browser. Open it from the **Library** tab, then **Files** in the bar under the tab icons. Inside a folder, its name appears under that bar; on touch devices, tap that line (or its back arrow) to go up one folder. The full path to the current directory is shown at the bottom of the screen. File extensions are displayed alongside each filename, and directories are shown with brackets (e.g. `[folder-name]`). Hidden directories (those beginning with `.`) are also visible.
 
 * **Navigate List:** Use **Left** (or **Side Up**), or **Right** (or **Side Down**) to move the selection cursor up and down through folders and books. You can also long-press these buttons to scroll a full page up or down.
 * **Open Selection:** Press **Confirm** to open a folder or start reading a selected book. Selecting a `.bmp` file will open the image viewer.
@@ -124,7 +133,7 @@ The Browse Files screen acts as a file and folder browser. The full path to the 
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The **Series** tab is included in the updated [X4 Pro firmware for v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin), built from [source commit `f537c15c`](https://github.com/ronylicha/crosspoint-reader/commit/f537c15c1168c50767e824873a45fdba5ea0a9f9) without changing the release version. Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The shelves and the **Series** tab are part of [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
 
 Four tabs organise the books. The arrow beside the active tab shows the sort direction:
 
@@ -146,7 +155,7 @@ On a button-only device:
 - Press **Back** to leave an open series folder; otherwise it clears an active search, then returns focus to the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to open Search. Holding a navigation button steps through the tabs.
 - Hold **Confirm for one second** on a selected book to open its details.
 
-On a touch device, tap a cover to open its book. Swipe up or down to move to another page of twelve covers. Tap a tab to change the order, or tap the active tab again to reverse it. Use the Search icon to enter a title or author. Long-press a cover to open its details.
+On a touch device, tap a cover to open its book. Swipe up or down to move to another page of twelve covers. Tap a tab to change the order, or tap the active tab again to reverse it. The **Search** and **Refresh** buttons sit at the right of the **Library | Files** bar. While a search or a series folder is open, a line under that bar shows it; tap it (or its back arrow) to step back. Long-press a cover to open its details.
 
 The details popup shows the available title, author, filename, location on the SD card, format, indexed file size, series, and volume number. **Book actions** is available from the first page to open the book, refresh the library, delete the file with confirmation, or remove it from reading history when applicable. Choose **More details** if the information spans several pages. Removing a book from Recent keeps its file on the SD card. Press **Back** to close the popup.
 
@@ -154,7 +163,7 @@ Cover thumbnails are cached on the SD card and prepared one at a time. A book wi
 
 The index is created automatically the first time the Library is opened. When upgrading to Series, the previous index is rebuilt automatically while preserving the arrival history of known books. After transferring a new volume, changing metadata, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. Updated metadata in Calibre must be transferred in the EPUB before refreshing the library.
 
-The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **555 tests**, and **104 targeted tests pass under ASan/UBSan**. The X4 Pro build succeeds without warnings; all 659 production files match the build snapshot. The published [release asset](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) was downloaded from its public URL and matches the local build exactly: **5,886,192 bytes**, SHA-256 `91c2ddb900278bd8c72ff9cff7770075a312c7d3c728cd7f5770d3866c400cc1`, also matching GitHub's digest. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **568 tests**. The X4 Pro and X4/X3 builds succeed without warnings. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 
@@ -265,8 +274,9 @@ The Settings screen allows you to configure the device's behavior. There are a f
   
   - "Classic" - The original Crosspoint theme
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
-  - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
+
+  The former "Lyra Extended" and "Cover Grid" choices only changed the Home screen, which every theme now shares; a device set to either opens with Lyra.
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   
@@ -612,6 +622,26 @@ There are three ways to install fonts:
 Once installed, custom fonts appear in **Settings → Reader → Font Family** alongside the built-in fonts.
 
 See [docs/sd-card-fonts.md](./docs/sd-card-fonts.md) for full installation details and SD card folder structure.
+
+### 3.9 Reading Statistics
+
+The **Statistics** tab summarises your reading:
+
+* **Today:** reading time and pages, each compared with yesterday, chapters read and the current day streak.
+* **Last 7 days:** reading time per day.
+* **All time:** total reading time, pages, chapters, average time per page and books finished.
+* **Recently read:** time spent and pages read in each recent book.
+
+How reading is counted:
+
+* Time is credited to a page when you turn **forward** from it. Under 2 seconds counts the page but not the time; over 10 minutes is capped at 10 minutes. The page on screen when you close the book is not counted.
+* A chapter counts when you read into the next one; jumping from the table of contents does not.
+* A book counts as finished the first time you reach its end.
+* Daily figures need the date. Set it in **Settings → System → Clock → Date & time** (devices with a clock chip, such as the X4 Pro) or **Settings → System → Date & time** (other devices), or let Wi-Fi synchronise it. While the date is unknown, the Home chart and the Statistics tab show a **Set the date** button that opens this screen. Reading done without a known date still adds to the all-time totals.
+
+**Date & time** lists day, month, year, hour and minute. Tap **−**/**+** (or use the side buttons to pick a row and front **Left**/**Right** to change it), then **Save**. The date is interpreted in the configured time zone.
+
+Statistics are saved every 20 pages or 5 minutes of reading, and when you leave a book or the device sleeps, in `/.crosspoint/reading_stats.json`. Delete that file to reset them.
 
 ---
 

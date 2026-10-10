@@ -625,3 +625,29 @@ make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+## Reading statistics (`.crosspoint/reading_stats.json`)
+
+JSON written by `ReadingStatsStore` through `PersistableStore`; the aggregate
+itself is `lib/ReadingStats/ReadingLog`. Days are local calendar days counted
+from 1970-01-01; `0` means the date was unknown and never appears in `days`.
+
+```json
+{
+  "version": 1,
+  "lifetime": { "seconds": 5400, "pages": 312, "chapters": 9, "finished": 2 },
+  "days": [[20735, 1800, 96, 3, 0], [20736, 2040, 108, 2, 1]],
+  "books": [
+    { "path": "/Books/a.epub", "seconds": 3840, "pages": 204,
+      "chapters": 5, "lastDay": 20736, "finished": true }
+  ]
+}
+```
+
+- `days` rows are `[day, seconds, pages, chapters, booksFinished]`, oldest
+  first, at most 30 rows.
+- `books` lists at most 24 books, most recently read first.
+- `finished` counts a book once, the first time its end is reached.
+- Loading sorts and caps both lists and drops duplicate days or paths, so a
+  hand-edited file cannot break these invariants. Deleting the file resets
+  the statistics.

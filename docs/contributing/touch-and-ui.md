@@ -4,7 +4,7 @@ CrossPoint runs on touch devices (Seeed Sticky, M5Paper, M5Stack PaperMono, Lily
 
 **There is one supported way to build a new screen: FreeInkUI, hosted through the firmware base classes below.** Touch hit-testing, tap highlighting, long-press, swipe scrolling, and button focus navigation all come from the shared stack; you never hand-roll coordinate math.
 
-The old bridge helpers (`rowTouch`, `colTouch`, `wasTapInRect`, manual rect `contains()` checks) are legacy. They survive only for the two remaining hand-rolled surfaces (the theme-driven home screen and the reader page) and must not appear in new code. PRs that add new uses will be asked to convert.
+The old bridge helpers (`rowTouch`, `colTouch`, `wasTapInRect`) are gone, and manual rect `contains()` checks must not appear in new code. Raw touch reads survive only on the reader page and the crash screen's tap-to-dismiss. Root screens add the shared app tab bar with `appnav::buildChrome()` / `appnav::registerTabs()` (`src/components/AppNavigation.h`), which are FreeInkUI elements like any other. PRs that add new uses will be asked to convert.
 
 ---
 
@@ -122,9 +122,7 @@ Because the back gesture arrives as `Button::Back`, most button-era activities g
 
 | Helper | Status |
 |---|---|
-| `wasScreenTapped` / `wasScreenTouchDown` / `isScreenTouchHeld` | Consumed by the FUI snapshot builder. Direct use only in the two legacy surfaces |
-| `wasTapInRect(x, y, w, h)` | Legacy one-off hit test |
-| `rowTouch` / `colTouch` | Legacy row/column band math. Sole remaining user: `HomeActivity` (theme-driven layout) |
+| `wasScreenTapped` / `wasScreenTouchDown` / `isScreenTouchHeld` | Consumed by the FUI snapshot builder. Direct use only on the reader page and the crash screen |
 | `wasSwipe()` | Raw swipe direction, for behavior beyond the global gestures (reader page turns) |
 | `hasTouch()` | Still fine anywhere: gate touch-only chrome (on-screen Cancel/OK pairs) on it |
 

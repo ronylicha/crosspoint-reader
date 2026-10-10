@@ -1,6 +1,10 @@
 # Bibliothèque : couvertures sur étagères
 
-La bibliothèque sur étagères et l'onglet **Séries** sont disponibles dans le [firmware X4 Pro de v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3). L'asset `firmware-x4pro-jeux.bin` a été mis à jour depuis le [commit source `f537c15c`](https://github.com/ronylicha/crosspoint-reader/commit/f537c15c1168c50767e824873a45fdba5ea0a9f9), sans changer de version. Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
+
+## Accès
+
+Touchez l'icône **Bibliothèque** de la barre d'onglets, en haut de l'écran. Une seconde barre propose **Bibliothèque** (sélectionnée), **Fichiers** (le navigateur de la carte SD) et, si un plugin est installé ou un serveur OPDS configuré, **Plugins** ou **Catalogues**. Les boutons **Recherche** et **Actualiser** se trouvent à droite de cette barre ; sur un appareil à boutons, seule la recherche y figure. Une recherche active ou une série ouverte s'affiche sur une ligne en dessous : touchez-la, ou sa flèche, pour revenir en arrière.
 
 La bibliothèque affiche les livres sous forme de couvertures posées sur trois étagères. Chaque page contient jusqu'à **12 livres : quatre colonnes et trois rangées**. Les emplacements restants restent vides sur la dernière page. Un cadre indique le livre sélectionné.
 
@@ -71,9 +75,9 @@ Après avoir ajouté, renommé ou déplacé des livres sur la carte SD, utilisez
 
 ## Vérification sur liseuse
 
-La suite complète passe avec **555 tests hôte**. Les **104 tests ciblés de format, lecture d'index, construction d'index, étagères et navigation** passent aussi sous ASan/UBSan. La revue ciblée n'a relevé aucun problème restant après validation de deux corrections. La compilation X4 Pro réussit sans avertissement en **285,938 secondes** ; les **659 fichiers de production** sont identiques au snapshot avant et après compilation. Aucun résultat matériel n'est acquis.
+La suite complète passe avec **568 tests hôte**. Les compilations X4 Pro et X4/X3 réussissent sans avertissement. Aucun résultat matériel n'est acquis.
 
-Le [firmware publié avec Séries](https://github.com/ronylicha/crosspoint-reader/releases/download/v1.6.5-games.3/firmware-x4pro-jeux.bin) compte **5 886 192 octets**. Son SHA-256 est `91c2ddb900278bd8c72ff9cff7770075a312c7d3c728cd7f5770d3866c400cc1`. Le téléchargement depuis l'URL publique a été comparé au build local : les fichiers sont identiques et le digest GitHub correspond. La release garde sa version ; ses notes précisent le commit source du binaire actualisé. Pour l'installation, suivez les [instructions du README](../README.md#installation).
+Les tailles et empreintes des deux binaires figurent dans le [README](../README.md#bibliothèque-sur-étagères). Pour l'installation, suivez les [instructions du README](../README.md#installation).
 
 Les essais suivants vérifient le rendu E-Ink et les commandes sur l'appareil :
 

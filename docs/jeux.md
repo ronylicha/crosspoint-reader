@@ -1,19 +1,20 @@
 # Jeux — Échecs, Dames et Backgammon (X4 Pro)
 
-Ce fork ajoute un menu **Jeux** à l'écran d'accueil de CrossPoint Reader, avec trois jeux exploitant l'écran tactile du Xteink X4 Pro.
+Ce fork ajoute un onglet **Jeux** (icône manette) à la barre d'onglets de CrossPoint Reader, avec trois jeux exploitant l'écran tactile du Xteink X4 Pro.
+
+Les jeux ne sont compilés que pour les liseuses tactiles : `firmware-x4pro-jeux.bin` les contient, `firmware-x4.bin` (X4 et X3, à boutons) n'a ni l'onglet ni le code des jeux. La macro `CROSSPOINT_GAMES` (`src/activities/games/GamesConfig.h`) vaut par défaut `FREEINK_CAP_TOUCH`.
 
 ## Menu Jeux
 
-Six entrées :
+Une carte par jeu, avec son icône (cavalier, pion de dames couronné, dés), une courte description et deux boutons de mode :
 
-| Entrée | Description |
-|---|---|
-| Échecs - 2 joueurs | Deux joueurs à tour de rôle sur le même appareil |
-| Échecs - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
-| Dames - 2 joueurs | Dames internationales 10×10, deux joueurs |
-| Dames - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
-| Backgammon - 2 joueurs | Backgammon classique, deux joueurs |
-| Backgammon - contre l'IA | Vous jouez les blancs, l'IA joue les noirs |
+| Jeu | 2 joueurs | contre l'IA |
+|---|---|---|
+| Échecs | Deux joueurs à tour de rôle sur le même appareil | Vous jouez les blancs, l'IA joue les noirs |
+| Dames | Dames internationales 10×10, deux joueurs | Vous jouez les blancs, l'IA joue les noirs |
+| Backgammon | Backgammon classique, deux joueurs | Vous jouez les blancs, l'IA joue les noirs |
+
+En tactile, touchez directement le bouton de mode. Avec les boutons, Haut/Bas parcourent les six modes dans l'ordre du tableau et **Confirmer** lance la partie ; **Retour** revient à l'accueil.
 
 ## Commandes
 
@@ -81,7 +82,7 @@ Le plateau seul ne suffit pas à reprendre un tour. La sauvegarde conserve aussi
 
 Les vérifications logicielles passent : **495 tests hôte**, dont **45 scénarios jeux** avec contrôle tactile en portrait et paysage. Les 45 scénarios passent aussi sous ASan/UBSan sans diagnostic. La compilation X4 Pro réussit ; la revue de non-régression finale n’a relevé aucun problème dans le périmètre contrôlé.
 
-Le binaire `firmware-x4pro-jeux.bin` a été remplacé sur la [release v1.6.5-games.3](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.3), puis téléchargé à nouveau et comparé au fichier local : ils sont identiques. Taille : **5 872 144 octets**. SHA-256 : `484aec821cd308985e1da57de2b393d7c5567949ce626ca850adc14b13ef4b3f`.
+Les jeux sont publiés dans `firmware-x4pro-jeux.bin` de la [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7) ; taille et empreinte figurent dans le [README](../README.md#bibliothèque-sur-étagères).
 
 Aucun essai physique ni mesure de mémoire disponible pendant le jeu n’a été réalisé. Les contrôles suivants restent à faire sur l’appareil :
 
