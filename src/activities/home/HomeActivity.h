@@ -15,9 +15,10 @@
 #include "util/ButtonNavigator.h"
 
 // Home tab: the current book beside today's reading figures, a seven-day
-// chart and the next recent books, under the app tab bar.
+// chart and the next recent books, under the app tab bar. Sections float on
+// the page, separated by whitespace and dotted rules rather than frames.
 //
-// Built with FreeInkUI: the tab bar, book tiles, chart and "set the date"
+// Built with FreeInkUI: the tab bar, books, figures, chart and "set the date"
 // link register their taps in the app's interaction table.
 // Buttons: side Up/Down walk the books, front Left/Right walk the tab bar,
 // Confirm opens, Back resumes the last book.
@@ -39,14 +40,17 @@ class HomeActivity final : public Activity, private UiAppHost {
   bool isHomeActivity() const override { return true; }
 
  private:
+  // Borderless sections: whitespace and dotted rules separate them.
   struct Layout {
-    Rect hero;
+    Rect heroBook;  // cover and caption: the current book's tap target
     Rect heroCover;
-    Rect heroFigures;
     Rect heroCaption;  // title and progress under the cover
+    Rect heroFigures;  // today's figures beside the cover: opens Stats
     Rect chart;
     std::array<Rect, MAX_ROWS> rows;
     int rowCount = 0;
+    std::array<Rect, 2> rules;
+    int ruleCount = 0;
   };
   // Today's figures, snapshotted on enter so render never touches the store.
   struct TodayFigures {

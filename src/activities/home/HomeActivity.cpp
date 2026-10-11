@@ -19,6 +19,7 @@
 #include "activities/settings/DateTimeSettingsActivity.h"
 #include "components/StatsWidgets.h"
 #include "components/UITheme.h"
+#include "components/icons/appIcons.h"
 #include "components/icons/book.h"
 #include "fontIds.h"
 #include "util/BookProgress.h"
@@ -26,15 +27,25 @@
 namespace fui = freeink::ui;
 
 namespace {
-constexpr int OUTER_GAP = 10;
-constexpr int TILE_PAD = 12;
-constexpr int CHART_HEIGHT = 120;
-constexpr int ROW_HEIGHT = 96;
-constexpr int ROW_COVER_HEIGHT = ROW_HEIGHT - TILE_PAD;
-constexpr int PROGRESS_HEIGHT = 6;
-constexpr int FOCUS_GAP = 3;
+constexpr int SIDE_MARGIN = 16;
+constexpr int TOP_GAP = 14;
+constexpr int BOTTOM_GAP = 8;
+// Whitespace on each side of a dotted rule between two sections.
+constexpr int SECTION_GAP = 12;
+constexpr int SECTION_SPACE = 2 * SECTION_GAP + 1;
+constexpr int FIGURES_GAP = 20;  // cover to figures column
+constexpr int CHART_MIN_HEIGHT = 96;
+constexpr int CHART_MAX_HEIGHT = 132;
+constexpr int ROW_HEIGHT = 84;
+constexpr int ROW_GAP = 8;
+constexpr int ROW_COVER_HEIGHT = ROW_HEIGHT - 4;
+constexpr int ROW_TEXT_GAP = 14;
+// Rows kept on screen before the hero may grow: hero + two recent books.
+constexpr int MIN_ROWS = 2;
+constexpr int CAPTION_GAP = 8;
+constexpr int FOCUS_GAP = 5;
 constexpr int FOCUS_WIDTH = 3;
-constexpr int TILE_RADIUS = 10;
+constexpr int FOCUS_RADIUS = 10;
 constexpr int EMPTY_ICON_SIZE = 32;
 
 constexpr int SET_DATE_HEIGHT = 40;
@@ -48,13 +59,9 @@ fui::Rect toUi(const Rect& rect) {
                    static_cast<int16_t>(rect.height)};
 }
 
-void drawProgress(const GfxRenderer& renderer, const int x, const int y, const int width, const int percent) {
-  renderer.drawRect(x, y, width, PROGRESS_HEIGHT);
-  const int fill = (width - 2) * std::clamp(percent, 0, 100) / 100;
-  if (fill > 0) renderer.fillRect(x + 1, y + 1, fill, PROGRESS_HEIGHT - 2);
-}
-
 int coverWidthFor(const int height) { return height * 2 / 3; }
+
+int rowsSpan(const int count) { return count <= 0 ? 0 : count * ROW_HEIGHT + (count - 1) * ROW_GAP; }
 }  // namespace
 
 void HomeActivity::onEnter() {
@@ -135,48 +142,54 @@ void HomeActivity::loadFigures() {
 HomeActivity::Layout HomeActivity::computeLayout() const {
   Layout layout;
   const Rect content = UITheme::getContentArea(renderer);
-  const int left = content.x + OUTER_GAP;
-  const int width = content.width - 2 * OUTER_GAP;
-  const int top = appnav::contentTop(renderer) + OUTER_GAP;
-  const int bottom = appnav::contentBottom(renderer) - OUTER_GAP;
-  const int captionHeight = renderer.getLineHeight(UI_12_FONT_ID) + PROGRESS_HEIGHT + 10;
+  const int left = content.x + SIDE_MARGIN;
+  const int width = content.width - 2 * SIDE_MARGIN;
+  const int top = appnav::contentTop(renderer) + TOP_GAP;
+  const int bottom = appnav::contentBottom(renderer) - BOTTOM_GAP;
+  const int captionHeight = CAPTION_GAP + renderer.getLineHeight(UI_12_FONT_ID) + 4 + statswidgets::PROGRESS_BAR_HEIGHT;
   const bool landscape = renderer.getScreenWidth() > renderer.getScreenHeight();
+  const int recentCount = std::min(std::max(0, static_cast<int>(books.size()) - 1), MAX_ROWS);
 
-  // The hero tile hosts the cover (2:3) and, beside it, four figures.
+  // Cover (2:3) and its caption on the left, today's figures beside them.
   const auto layoutHero = [&](const Rect hero) {
-    layout.hero = hero;
-    const int maxCoverHeight = hero.height - 2 * TILE_PAD - captionHeight;
-    const int coverWidth = std::min(hero.width * 2 / 5, coverWidthFor(maxCoverHeight));
+    const int coverWidth = std::min(hero.width * 2 / 5, coverWidthFor(std::max(0, hero.height - captionHeight)));
     const int coverHeight = coverWidth * 3 / 2;
-    layout.heroCover = Rect{hero.x + TILE_PAD, hero.y + TILE_PAD, coverWidth, coverHeight};
-    layout.heroCaption = Rect{hero.x + TILE_PAD, layout.heroCover.y + coverHeight + 6, coverWidth, captionHeight - 6};
-    const int figuresX = layout.heroCover.x + coverWidth + TILE_PAD + 4;
-    layout.heroFigures =
-        Rect{figuresX, hero.y + TILE_PAD, hero.x + hero.width - TILE_PAD - figuresX, hero.height - 2 * TILE_PAD};
+    layout.heroCover = Rect{hero.x, hero.y, coverWidth, coverHeight};
+    layout.heroCaption = Rect{hero.x, hero.y + coverHeight + CAPTION_GAP, coverWidth, captionHeight - CAPTION_GAP};
+    layout.heroBook = Rect{hero.x, hero.y, coverWidth, coverHeight + captionHeight};
+    const int figuresX = hero.x + coverWidth + FIGURES_GAP;
+    layout.heroFigures = Rect{figuresX, hero.y, hero.x + hero.width - figuresX, coverHeight + captionHeight};
   };
-  const auto layoutRows = [&](const int x, int y, const int rowWidth, const int limit) {
-    const int available = std::max(0, static_cast<int>(books.size()) - 1);
-    while (layout.rowCount < std::min(available, MAX_ROWS) && y + ROW_HEIGHT <= limit) {
-      layout.rows[layout.rowCount++] = Rect{x, y, rowWidth, ROW_HEIGHT};
-      y += ROW_HEIGHT + OUTER_GAP;
+  // The chart, then below a rule as many recent rows as fit. The chart grows
+  // into what the rows leave, up to its cap.
+  const auto layoutSide = [&](const int x, const int y, const int sideWidth) {
+    const int rowsTop = y + CHART_MIN_HEIGHT + SECTION_SPACE;
+    while (layout.rowCount < recentCount && rowsTop + rowsSpan(layout.rowCount + 1) <= bottom) ++layout.rowCount;
+    const int below = layout.rowCount == 0 ? 0 : SECTION_SPACE + rowsSpan(layout.rowCount);
+    layout.chart = Rect{x, y, sideWidth, std::clamp(bottom - y - below, 0, CHART_MAX_HEIGHT)};
+    if (layout.rowCount == 0) return;
+    int rowY = layout.chart.y + layout.chart.height + SECTION_SPACE;
+    layout.rules[layout.ruleCount++] = Rect{x, rowY - SECTION_GAP - 1, sideWidth, 1};
+    for (int row = 0; row < layout.rowCount; ++row) {
+      layout.rows[row] = Rect{x, rowY, sideWidth, ROW_HEIGHT};
+      rowY += ROW_HEIGHT + ROW_GAP;
     }
   };
 
   if (landscape) {
     const int heroWidth = width * 11 / 20;
     layoutHero(Rect{left, top, heroWidth, bottom - top});
-    const int sideX = left + heroWidth + OUTER_GAP;
-    const int sideWidth = width - heroWidth - OUTER_GAP;
-    layout.chart = Rect{sideX, top, sideWidth, CHART_HEIGHT};
-    layoutRows(sideX, top + CHART_HEIGHT + OUTER_GAP, sideWidth, bottom);
+    layout.rules[layout.ruleCount++] = Rect{left + heroWidth + SECTION_GAP, top, 1, bottom - top};
+    layoutSide(left + heroWidth + SECTION_SPACE, top, width - heroWidth - SECTION_SPACE);
   } else {
-    // Hero gets what the chart and one row leave, capped so the cover stays
-    // a sensible size on tall panels.
-    const int heroHeight = std::min(bottom - top - CHART_HEIGHT - ROW_HEIGHT - 2 * OUTER_GAP,
-                                    2 * TILE_PAD + captionHeight + (width * 2 / 5) * 3 / 2);
-    layoutHero(Rect{left, top, width, std::max(heroHeight, 0)});
-    layout.chart = Rect{left, layout.hero.y + layout.hero.height + OUTER_GAP, width, CHART_HEIGHT};
-    layoutRows(left, layout.chart.y + CHART_HEIGHT + OUTER_GAP, width, bottom);
+    // The hero gets what the chart and MIN_ROWS rows leave, capped where the
+    // cover reaches two fifths of the width.
+    const int reserve = CHART_MIN_HEIGHT + 2 * SECTION_SPACE + rowsSpan(std::min(MIN_ROWS, recentCount));
+    const int heroMax = (width * 2 / 5) * 3 / 2 + captionHeight;
+    layoutHero(Rect{left, top, width, std::clamp(bottom - top - reserve, 0, heroMax)});
+    const int heroBottom = layout.heroBook.y + layout.heroBook.height;
+    layout.rules[layout.ruleCount++] = Rect{left, heroBottom + SECTION_GAP, width, 1};
+    layoutSide(left, heroBottom + SECTION_SPACE, width);
   }
   return layout;
 }
@@ -247,11 +260,10 @@ void HomeActivity::drawCover(const Rect& rect, const size_t index) {
 }
 
 void HomeActivity::drawHero(const Layout& layout) {
-  statswidgets::drawTile(renderer, layout.hero);
   const Rect& cover = layout.heroCover;
   if (books.empty()) {
     // No book yet: an invitation where the cover would be.
-    renderer.drawRoundedRect(cover.x, cover.y, cover.width, cover.height, 1, TILE_RADIUS, true);
+    renderer.drawRoundedRect(cover.x, cover.y, cover.width, cover.height, 1, FOCUS_RADIUS, true);
     renderer.drawIcon(BookIcon, cover.x + (cover.width - EMPTY_ICON_SIZE) / 2, cover.y + cover.height / 3,
                       EMPTY_ICON_SIZE);
     const Rect text{cover.x + 6, cover.y + cover.height / 3 + EMPTY_ICON_SIZE + 10, cover.width - 12, cover.height / 2};
@@ -266,17 +278,18 @@ void HomeActivity::drawHero(const Layout& layout) {
     const int statusWidth = renderer.getTextWidth(UI_10_FONT_ID, status);
     const std::string title =
         renderer.truncatedText(UI_12_FONT_ID, books[0].title.c_str(), caption.width - statusWidth - 8);
-    renderer.drawText(UI_12_FONT_ID, caption.x, caption.y, title.c_str(), true);
+    renderer.drawText(UI_12_FONT_ID, caption.x, caption.y, title.c_str(), true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, caption.x + caption.width - statusWidth, caption.y + 2, status, true);
-    drawProgress(renderer, caption.x, caption.y + renderer.getLineHeight(UI_12_FONT_ID) + 2, caption.width,
-                 finished[0] ? 100 : progress[0]);
+    statswidgets::drawProgressBar(renderer, caption.x, caption.y + renderer.getLineHeight(UI_12_FONT_ID) + 4,
+                                  caption.width, finished[0] ? 100 : progress[0]);
   }
 
-  // Today's figures, spread over the column beside the cover.
+  // Today's figures, each led by its icon, spread down the column beside the
+  // cover: first at the top, last level with the caption.
   const Rect& column = layout.heroFigures;
   const int figureHeight = statswidgets::figureHeight(renderer);
-  const int gap = std::max(4, (column.height - 4 * figureHeight) / 4);
-  int y = column.y + gap / 2;
+  const int gap = std::max(4, (column.height - 4 * figureHeight) / 3);
+  int y = column.y;
   char value[24];
   char delta[24];
   const char* dash = "-";
@@ -286,38 +299,38 @@ void HomeActivity::drawHero(const Layout& layout) {
     statswidgets::formatDuration(value, sizeof(value), figures.seconds);
     statswidgets::formatDuration(delta, sizeof(delta), static_cast<uint32_t>(std::abs(figures.secondsDelta)));
   }
-  statswidgets::drawFigure(renderer, column.x, y, column.width, figures.dated ? value : dash,
-                           figures.dated ? trendOf(figures.secondsDelta) : 0,
-                           figures.dated && figures.secondsDelta != 0 ? delta : nullptr, tr(STR_STAT_READING_TIME));
+  statswidgets::drawIconFigure(renderer, column.x, y, column.width, icon_stat_time_32, figures.dated ? value : dash,
+                               figures.dated ? trendOf(figures.secondsDelta) : 0,
+                               figures.dated && figures.secondsDelta != 0 ? delta : nullptr, tr(STR_STAT_READING_TIME));
   y += figureHeight + gap;
 
   if (figures.dated) {
     snprintf(value, sizeof(value), "%u", static_cast<unsigned>(figures.pages));
     snprintf(delta, sizeof(delta), "%u", static_cast<unsigned>(std::abs(figures.pagesDelta)));
   }
-  statswidgets::drawFigure(renderer, column.x, y, column.width, figures.dated ? value : dash,
-                           figures.dated ? trendOf(figures.pagesDelta) : 0,
-                           figures.dated && figures.pagesDelta != 0 ? delta : nullptr, tr(STR_STAT_PAGES));
+  statswidgets::drawIconFigure(renderer, column.x, y, column.width, icon_stat_pages_32, figures.dated ? value : dash,
+                               figures.dated ? trendOf(figures.pagesDelta) : 0,
+                               figures.dated && figures.pagesDelta != 0 ? delta : nullptr, tr(STR_STAT_PAGES));
   y += figureHeight + gap;
 
   snprintf(value, sizeof(value), "%u", static_cast<unsigned>(figures.streak));
-  statswidgets::drawFigure(renderer, column.x, y, column.width, figures.dated ? value : dash, 0, nullptr,
-                           tr(STR_STAT_STREAK));
+  statswidgets::drawIconFigure(renderer, column.x, y, column.width, icon_stat_streak_32, figures.dated ? value : dash,
+                               0, nullptr, tr(STR_STAT_STREAK));
   y += figureHeight + gap;
 
   snprintf(value, sizeof(value), "%u", static_cast<unsigned>(figures.finished));
   snprintf(delta, sizeof(delta), "%u", static_cast<unsigned>(figures.finishedToday));
-  statswidgets::drawFigure(renderer, column.x, y, column.width, value, figures.finishedToday > 0 ? 1 : 0,
-                           figures.finishedToday > 0 ? delta : nullptr, tr(STR_STAT_FINISHED));
+  statswidgets::drawIconFigure(renderer, column.x, y, column.width, icon_stat_finished_32, value,
+                               figures.finishedToday > 0 ? 1 : 0, figures.finishedToday > 0 ? delta : nullptr,
+                               tr(STR_STAT_FINISHED));
 }
 
 void HomeActivity::drawChart(const Layout& layout) const {
-  const Rect& tile = layout.chart;
-  statswidgets::drawTile(renderer, tile);
+  const Rect& section = layout.chart;
   const int headerHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  renderer.drawText(UI_10_FONT_ID, tile.x + TILE_PAD, tile.y + 6, tr(STR_STATS_LAST_7_DAYS), true, EpdFontFamily::BOLD);
-  const Rect chart{tile.x + TILE_PAD, tile.y + 10 + headerHeight, tile.width - 2 * TILE_PAD,
-                   tile.height - 16 - headerHeight};
+  renderer.drawText(UI_10_FONT_ID, section.x, section.y, tr(STR_STATS_LAST_7_DAYS), true, EpdFontFamily::BOLD);
+  const Rect chart{section.x, section.y + headerHeight + 6, section.width, section.height - headerHeight - 6};
+  if (chart.height <= 0) return;  // a panel too short for the chart keeps only its heading
   if (!figures.dated) {
     // The "set the date" button (buildScreen) takes the bottom of the tile.
     const Rect message{chart.x, chart.y, chart.width, chart.height - SET_DATE_HEIGHT - 4};
@@ -329,8 +342,7 @@ void HomeActivity::drawChart(const Layout& layout) const {
   char total[24];
   statswidgets::formatDuration(total, sizeof(total), weekSeconds);
   const int totalWidth = renderer.getTextWidth(UI_10_FONT_ID, total, EpdFontFamily::BOLD);
-  renderer.drawText(UI_10_FONT_ID, tile.x + tile.width - TILE_PAD - totalWidth, tile.y + 6, total, true,
-                    EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, section.x + section.width - totalWidth, section.y, total, true, EpdFontFamily::BOLD);
   statswidgets::drawDayChart(renderer, chart, figures.week, 7);
 }
 
@@ -338,16 +350,15 @@ void HomeActivity::drawRow(const Layout& layout, const int row) {
   const size_t index = static_cast<size_t>(row) + 1;
   const Rect& rect = layout.rows[row];
   const RecentBook& book = books[index];
-  statswidgets::drawTile(renderer, rect);
-  const Rect cover{rect.x + TILE_PAD / 2 + 4, rect.y + (rect.height - ROW_COVER_HEIGHT) / 2,
-                   coverWidthFor(ROW_COVER_HEIGHT), ROW_COVER_HEIGHT};
+  const Rect cover{rect.x, rect.y + (rect.height - ROW_COVER_HEIGHT) / 2, coverWidthFor(ROW_COVER_HEIGHT),
+                   ROW_COVER_HEIGHT};
   drawCover(cover, index);
 
-  const int textX = cover.x + cover.width + TILE_PAD;
-  const int textWidth = rect.x + rect.width - TILE_PAD - textX;
+  const int textX = cover.x + cover.width + ROW_TEXT_GAP;
+  const int textWidth = rect.x + rect.width - textX;
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int smallHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  int y = rect.y + TILE_PAD / 2 + 2;
+  int y = cover.y + 2;
   const std::string title = renderer.truncatedText(UI_12_FONT_ID, book.title.c_str(), textWidth, EpdFontFamily::BOLD);
   renderer.drawText(UI_12_FONT_ID, textX, y, title.c_str(), true, EpdFontFamily::BOLD);
   y += titleHeight;
@@ -358,17 +369,17 @@ void HomeActivity::drawRow(const Layout& layout, const int row) {
   char percent[8];
   snprintf(percent, sizeof(percent), "%d%%", std::max(0, progress[index]));
   const char* status = finished[index] ? tr(STR_COMPLETED) : percent;
-  const int barY = rect.y + rect.height - TILE_PAD / 2 - PROGRESS_HEIGHT - 2;
+  const int barY = cover.y + cover.height - statswidgets::PROGRESS_BAR_HEIGHT - 2;
   const int statusWidth = renderer.getTextWidth(UI_10_FONT_ID, status);
-  renderer.drawText(UI_10_FONT_ID, textX + textWidth - statusWidth, barY - smallHeight - 2, status, true);
-  drawProgress(renderer, textX, barY, textWidth, finished[index] ? 100 : progress[index]);
+  renderer.drawText(UI_10_FONT_ID, textX + textWidth - statusWidth, barY - smallHeight - 4, status, true);
+  statswidgets::drawProgressBar(renderer, textX, barY, textWidth, finished[index] ? 100 : progress[index]);
 }
 
 void HomeActivity::drawFocus(const Rect& rect) const {
   for (int i = 0; i < FOCUS_WIDTH; ++i) {
     const int grow = FOCUS_GAP + i;
     renderer.drawRoundedRect(rect.x - grow, rect.y - grow, rect.width + 2 * grow, rect.height + 2 * grow, 1,
-                             TILE_RADIUS + grow, true);
+                             FOCUS_RADIUS + grow, true);
   }
 }
 
@@ -385,8 +396,11 @@ void HomeActivity::buildScreen(UiScreen& screen) {
   appnav::buildChrome(screen, renderer, AppTab::Home, focusedTab);
   auto& frame = screen.frame();
 
+  for (int rule = 0; rule < layout.ruleCount; ++rule) statswidgets::drawRule(renderer, layout.rules[rule]);
+
   drawHero(layout);
-  if (!books.empty()) frame.hit(toUi(layout.hero), ACTION_OPEN_BOOK, 0, fui::InputTouch);
+  if (!books.empty()) frame.hit(toUi(layout.heroBook), ACTION_OPEN_BOOK, 0, fui::InputTouch);
+  frame.hit(toUi(layout.heroFigures), ACTION_OPEN_STATS, 0, fui::InputTouch);
 
   drawChart(layout);
   if (figures.dated) {
@@ -402,12 +416,11 @@ void HomeActivity::buildScreen(UiScreen& screen) {
     setDate.text.align = fui::TextAlign::Center;
     setDate.radius = static_cast<uint8_t>(theme.controlRadius);
     setDate.minTouchSize = theme.minTouchSize;
-    const int width = std::min(layout.chart.width - 2 * TILE_PAD, layout.chart.width * 3 / 5);
-    fui::button(
-        frame,
-        toUi(Rect{layout.chart.x + (layout.chart.width - width) / 2,
-                  layout.chart.y + layout.chart.height - TILE_PAD / 2 - SET_DATE_HEIGHT, width, SET_DATE_HEIGHT}),
-        setDate);
+    const int width = layout.chart.width * 3 / 5;
+    fui::button(frame,
+                toUi(Rect{layout.chart.x + (layout.chart.width - width) / 2,
+                          layout.chart.y + layout.chart.height - SET_DATE_HEIGHT, width, SET_DATE_HEIGHT}),
+                setDate);
   }
 
   for (int row = 0; row < layout.rowCount; ++row) {
@@ -415,7 +428,7 @@ void HomeActivity::buildScreen(UiScreen& screen) {
     frame.hit(toUi(layout.rows[row]), ACTION_OPEN_BOOK, static_cast<int16_t>(row + 1), fui::InputTouch);
   }
 
-  if (buttonCursor && selection < slots) drawFocus(selection == 0 ? layout.hero : layout.rows[selection - 1]);
+  if (buttonCursor && selection < slots) drawFocus(selection == 0 ? layout.heroBook : layout.rows[selection - 1]);
 }
 
 void HomeActivity::render(RenderLock&&) {

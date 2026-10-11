@@ -21,6 +21,7 @@ constexpr int ROW_FONT_ID = UI_12_FONT_ID;
 constexpr int TREND_ICON = 24;
 constexpr int TILE_RADIUS = 10;
 constexpr int ROW_ICON = 24;
+constexpr int FIGURE_ICON_GAP = 12;
 
 constexpr StrId WEEKDAY_INITIALS[7] = {StrId::STR_WEEKDAY_SUN_SHORT, StrId::STR_WEEKDAY_MON_SHORT,
                                        StrId::STR_WEEKDAY_TUE_SHORT, StrId::STR_WEEKDAY_WED_SHORT,
@@ -73,6 +74,29 @@ int drawFigure(const GfxRenderer& renderer, const int x, const int y, const int 
   }
   renderer.drawText(LABEL_FONT_ID, x, y + valueHeight + 2, label, true);
   return figureHeight(renderer);
+}
+
+int drawIconFigure(const GfxRenderer& renderer, const int x, const int y, const int width, const freeink::Icon& icon,
+                   const char* value, const int trend, const char* trendText, const char* label) {
+  const int height = figureHeight(renderer);
+  drawIcon(renderer, icon, x, y + (height - icon.h) / 2);
+  const int textX = x + icon.w + FIGURE_ICON_GAP;
+  return drawFigure(renderer, textX, y, width - (textX - x), value, trend, trendText, label);
+}
+
+void drawRule(const GfxRenderer& renderer, const Rect rect) {
+  if (rect.width >= rect.height) {
+    renderer.fillRectDither(rect.x, rect.y, rect.width, 1, Color::DarkGray);
+  } else {
+    renderer.fillRectDither(rect.x, rect.y, 1, rect.height, Color::DarkGray);
+  }
+}
+
+void drawProgressBar(const GfxRenderer& renderer, const int x, const int y, const int width, const int percent) {
+  if (width <= 0) return;
+  renderer.fillRectDither(x, y, width, PROGRESS_BAR_HEIGHT, Color::LightGray);
+  const int fill = width * std::clamp(percent, 0, 100) / 100;
+  if (fill > 0) renderer.fillRect(x, y, fill, PROGRESS_BAR_HEIGHT);
 }
 
 void drawDayChart(const GfxRenderer& renderer, const Rect rect, const readingstats::DayTotals* days,

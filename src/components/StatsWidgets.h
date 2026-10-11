@@ -30,6 +30,17 @@ int drawFigure(const GfxRenderer& renderer, int x, int y, int width, const char*
 // Height drawFigure() uses, for laying out a column of figures.
 int figureHeight(const GfxRenderer& renderer);
 
+// drawFigure() led by a 32 px icon centred on the figure's height.
+int drawIconFigure(const GfxRenderer& renderer, int x, int y, int width, const freeink::Icon& icon, const char* value,
+                   int trend, const char* trendText, const char* label);
+
+// Dotted hairline separating borderless sections; draws along the longer side.
+void drawRule(const GfxRenderer& renderer, Rect rect);
+
+// Slim reading-progress bar: light dotted track under a solid fill.
+void drawProgressBar(const GfxRenderer& renderer, int x, int y, int width, int percent);
+constexpr int PROGRESS_BAR_HEIGHT = 4;
+
 // Bar chart of reading minutes per day, oldest left, weekday initials below;
 // today's bar is solid, earlier days dithered. Bars scale to the busiest day.
 void drawDayChart(const GfxRenderer& renderer, Rect rect, const readingstats::DayTotals* days, size_t count);
