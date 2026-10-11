@@ -58,10 +58,20 @@ class LibraryListActivity final : public UiTabListActivity {
   // Same staged back-out as Button::Back.
   static void contextBackTrampoline(const freeink::ui::ActionEvent& event, void* user);
 
-  // Walk the card and write a fresh index. Blocking, with a popup: at ~70 books
-  // it is well under a second, and it only runs when the index is missing or the
-  // user asks.
+  // Walk the card and write a fresh index. Blocking, under a popup with a
+  // progress bar: a first build reads every EPUB's metadata and can take a
+  // while on a large card. Runs when the index is missing or stale, or on
+  // request. Caller holds the render lock.
   bool rebuildIndex();
+  static void rebuildProgressTrampoline(void* context, uint8_t percent);
+
+  // Loading popup with a progress bar, drawn over the current frame. Each
+  // update is an E-Ink refresh, so updates come in visible steps only.
+  void showLoadingPopup(const char* message);
+  void updateLoadingPopup(int percent);
+  Rect loadingPopup{};
+  int loadingShownPercent = 0;
+  unsigned long loadingRefreshMs = 0;
 
   // Input
   void openSelectedBook();
@@ -129,7 +139,10 @@ class LibraryListActivity final : public UiTabListActivity {
     uint32_t fileSize = 0;
   };
   bool resolveBook(int entry, ShelfBook& book);
+  // Resolves the page's books and their existing thumbnails. Missing ones are
+  // left for generateShelfCovers(), which runs after the frame is shown.
   void prepareShelf(int top, int thumbHeight);
+  void generateShelfCovers();
   bool paintShelfCover(freeink::ui::Rect rect, uint16_t entry);
   static freeink::ui::CoverGridItem shelfItemProvider(uint16_t index, void* user);
   static bool shelfCoverPainter(freeink::ui::DrawTarget& target, freeink::ui::Rect rect,
@@ -212,6 +225,8 @@ class LibraryListActivity final : public UiTabListActivity {
   int shelfTop = -1;
   int shelfCount = 0;
   int shelfThumbHeight = 0;
+  std::array<bool, SHELF_PAGE_SIZE> shelfCoverMissing{};
+  bool shelfCoversPending = false;
   freeink::ui::CoverGridProps shelfGrid{};
   freeink::ui::ListProps shelfNavigation{};
   HalFile shelfCoverFile;

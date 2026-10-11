@@ -914,3 +914,53 @@ TEST_F(LibraryBuilderTest, EmptyStaleFoldIndexRebuildsToCurrentFoldVersion) {
   ASSERT_TRUE(index.open(INDEX));
   EXPECT_EQ(index.header().foldVersion, CLIX_FOLD_VERSION);
 }
+
+namespace {
+void recordPercent(void* context, const uint8_t percent) {
+  static_cast<std::vector<uint8_t>*>(context)->push_back(percent);
+}
+
+void expectRisingToComplete(const std::vector<uint8_t>& percents) {
+  ASSERT_FALSE(percents.empty());
+  // Strictly rising: no neighbour pair where the later value is not larger.
+  EXPECT_EQ(std::adjacent_find(percents.begin(), percents.end(), std::greater_equal<>()), percents.end());
+  EXPECT_EQ(percents.back(), 100);
+}
+}  // namespace
+
+TEST_F(LibraryBuilderTest, FirstBuildReportsWalkProgressFromAPreCount) {
+  fake::reset();
+  for (unsigned i = 0; i < 8; i++) fake::add("/folder/book" + numbered("", i) + ".txt");
+  std::vector<uint8_t> percents;
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, false, BuildProgress{&recordPercent, &percents}));
+
+  expectRisingToComplete(percents);
+  // Eight books spread the walk share over several steps.
+  const auto walkSteps =
+      std::count_if(percents.begin(), percents.end(), [](const uint8_t p) { return p > 5 && p <= 85; });
+  EXPECT_GE(walkSteps, 8);
+}
+
+TEST_F(LibraryBuilderTest, RebuildReportsProgressAgainstThePreviousIndex) {
+  initial();
+  fake::add("/c.epub");
+  fake::directoryEntriesByPath.clear();
+  std::vector<uint8_t> percents;
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, BuildProgress{&recordPercent, &percents}));
+
+  expectRisingToComplete(percents);
+  // The previous index gives the estimate: no counting pass re-enumerates the card.
+  EXPECT_EQ(fake::directoryEntriesByPath["/a.epub"], 1u);
+}
+
+TEST_F(LibraryBuilderTest, UnchangedRebuildStillCompletesTheProgress) {
+  initial();
+  std::vector<uint8_t> percents;
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, BuildProgress{&recordPercent, &percents}));
+
+  EXPECT_FALSE(stats.indexReplaced);
+  expectRisingToComplete(percents);
+}

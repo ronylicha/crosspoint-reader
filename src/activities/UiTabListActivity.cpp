@@ -132,6 +132,7 @@ void UiTabListActivity::buildTabBar(UiScreen& screen) {
     tabProps.tabInset = tabsFocused ? fui::Insets{2, 4, 4, 4} : fui::Insets{2, 4, 0, 4};
     tabProps.contentInset = fui::Insets{2, 0, 2, 0};
   }
+  if (tabLabelFont != THEME_TAB_FONT) tabProps.text.font = tabLabelFont;
   const int16_t tabLineHeight = screen.target().lineHeight(tabProps.text.font);
   const int16_t preferredTabHeight =
       mappedInput.hasTouch() ? TOUCH_TAB_BAR_HEIGHT : static_cast<int16_t>(metrics.tabBarHeight);

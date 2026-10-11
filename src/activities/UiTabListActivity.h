@@ -74,6 +74,10 @@ class UiTabListActivity : public UiListActivity {
   // default full-slot pill stretches across a third of the screen; screens
   // with more tabs (Settings) keep the default of 0 (fill the slot).
   int16_t tabPillMaxPad = 0;
+  // Overrides the theme's tab label font slot (a GfxRendererTarget::FONT_*),
+  // for strips whose labels carry an indicator and would otherwise be cut.
+  static constexpr freeink::ui::FontId THEME_TAB_FONT = 0xFFFF;
+  freeink::ui::FontId tabLabelFont = THEME_TAB_FONT;
 
  private:
   static void tabActionTrampoline(const freeink::ui::ActionEvent& event, void* user);

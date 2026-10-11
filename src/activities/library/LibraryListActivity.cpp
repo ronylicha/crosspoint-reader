@@ -47,6 +47,13 @@ constexpr int BUTTON_TRAILING_COUNT = 1;
 constexpr int CONTEXT_ROW_PAD = 8;
 constexpr int TOUCH_CONTEXT_ROW_HEIGHT = 44;
 constexpr int BACK_ICON_GAP = 8;
+// Each progress update is a partial E-Ink refresh (a few hundred ms): update in
+// visible steps, and not more often than the panel can usefully show.
+constexpr int LOADING_PROGRESS_STEP = 5;
+constexpr unsigned long LOADING_REFRESH_MS = 700;
+// Sort strip labels: small type and tight pills keep "Récents ↑" whole in a
+// quarter of a 480 px screen.
+constexpr int16_t TAB_PILL_PAD = 6;
 
 constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
@@ -131,7 +138,8 @@ std::string detailsPage(const GfxRenderer& renderer, const std::string& message,
 LibraryListActivity::LibraryListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : UiTabListActivity("Library", renderer, mappedInput, true) {
   // Keep the pill close to its label inside each fixed tab slot.
-  tabPillMaxPad = 16;
+  tabPillMaxPad = TAB_PILL_PAD;
+  tabLabelFont = fui::GfxRendererTarget::FONT_LABEL;  // bound to SMALL_FONT_ID
 }
 
 void LibraryListActivity::onEnter() {
@@ -157,7 +165,6 @@ void LibraryListActivity::onEnter() {
                              index.header().metadataEnabled != readMetadata;
   if (rebuildNeeded) {
     index.close();
-    GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
     rebuildIndex();
     if (!index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot open library index");
   }
@@ -180,9 +187,34 @@ void LibraryListActivity::onExit() {
   Activity::onExit();
 }
 
+void LibraryListActivity::showLoadingPopup(const char* message) {
+  loadingPopup = GUI.drawPopup(renderer, message);
+  loadingShownPercent = 0;
+  GUI.fillPopupProgress(renderer, loadingPopup, 0);
+  loadingRefreshMs = millis();
+}
+
+// A fast rebuild (metadata reused) finishes before the next refresh is due, so
+// it pays for no extra E-Ink update. 100 % is never drawn: the screen repaints
+// right after.
+void LibraryListActivity::updateLoadingPopup(const int percent) {
+  if (percent >= 100 || percent < loadingShownPercent + LOADING_PROGRESS_STEP) return;
+  const unsigned long now = millis();
+  if (now - loadingRefreshMs < LOADING_REFRESH_MS) return;
+  loadingShownPercent = percent;
+  GUI.fillPopupProgress(renderer, loadingPopup, percent);
+  loadingRefreshMs = millis();
+}
+
+void LibraryListActivity::rebuildProgressTrampoline(void* context, const uint8_t percent) {
+  static_cast<LibraryListActivity*>(context)->updateLoadingPopup(percent);
+}
+
 bool LibraryListActivity::rebuildIndex() {
+  showLoadingPopup(tr(STR_LIBRARY_REBUILDING));
   library::BuildStats stats;
-  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0);
+  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0,
+                                             library::BuildProgress{&rebuildProgressTrampoline, this});
   if (!ok) {
     LOG_ERR("LIB", "index build failed");
     return false;
@@ -431,7 +463,6 @@ void LibraryListActivity::showRecentBookOptions(const int entry) {
 // the filter) around it.
 void LibraryListActivity::promptRebuildIndex() {
   RenderLock lock(*this);
-  GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
   index.close();
   rebuildIndex();
   if (!index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot open library index");
@@ -550,7 +581,6 @@ void LibraryListActivity::promptDeleteBookByPath(const std::string& path, const 
         clearBookCache(path);
         if (!Storage.remove(path.c_str())) LOG_ERR("LIB", "cannot delete %s", path.c_str());
         if (RECENT_BOOKS.removeByPath(path)) RECENT_BOOKS.saveToFile();
-        GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
         rebuildIndex();
       }
       if (!index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
@@ -1200,40 +1230,76 @@ void LibraryListActivity::prepareShelf(const int top, const int thumbHeight) {
   shelfTop = top;
   shelfThumbHeight = thumbHeight;
   shelfCount = library::shelf::visibleCount(top, bookRowCount());
-  for (int slot = 0; slot < shelfCount; ++slot) resolveBook(top + slot, shelfBooks[static_cast<size_t>(slot)]);
+  shelfCoversPending = false;
+  for (int slot = 0; slot < shelfCount; ++slot) {
+    auto& book = shelfBooks[static_cast<size_t>(slot)];
+    bool& missing = shelfCoverMissing[static_cast<size_t>(slot)];
+    missing = false;
+    if (!resolveBook(top + slot, book)) continue;
+    if (!book.thumbPath.empty()) {
+      book.thumbPath = UITheme::getCoverThumbPath(book.thumbPath, thumbHeight);
+      if (Storage.exists(book.thumbPath.c_str())) continue;
+      book.thumbPath.clear();
+    }
+    if (FsHelpers::hasReflowableBookExtension(book.path) || FsHelpers::hasXtcExtension(book.path)) {
+      missing = true;
+      shelfCoversPending = true;
+    }
+  }
+}
+
+void LibraryListActivity::generateShelfCovers() {
+  shelfCoversPending = false;
+  int total = 0;
+  for (int slot = 0; slot < shelfCount; ++slot) total += shelfCoverMissing[static_cast<size_t>(slot)] ? 1 : 0;
+  if (total == 0) return;
+
+  // A cached cover only needs its path; the popup is for real generation.
+  bool popupShown = false;
+  int done = 0;
   // Large parsers exceed the stack budget. Keep exactly one fallible parser
   // alive, release it between covers, and leave all resident images on SD.
   const bool reopen = index.isOpen();
   index.close();
+  const int thumbHeight = shelfThumbHeight;
+  const auto beginGeneration = [this, &popupShown] {
+    if (popupShown) return;
+    popupShown = true;
+    showLoadingPopup(tr(STR_LIBRARY_PREPARING_COVERS));
+  };
   for (int slot = 0; slot < shelfCount; ++slot) {
+    if (!shelfCoverMissing[static_cast<size_t>(slot)]) continue;
+    shelfCoverMissing[static_cast<size_t>(slot)] = false;
     auto& book = shelfBooks[static_cast<size_t>(slot)];
-    if (book.path.empty()) continue;
-    if (!book.thumbPath.empty()) {
-      book.thumbPath = UITheme::getCoverThumbPath(book.thumbPath, thumbHeight);
-      if (Storage.exists(book.thumbPath.c_str())) continue;
-    }
-    book.thumbPath.clear();
     if (FsHelpers::hasReflowableBookExtension(book.path)) {
       auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
       if (!epub) {
         LOG_ERR("LIB", "OOM: EPUB cover");
-        continue;
+      } else {
+        book.thumbPath = epub->getThumbBmpPath(thumbHeight);
+        if (!Storage.exists(book.thumbPath.c_str())) {
+          beginGeneration();
+          if (!epub->generateThumbBmpFromSource(thumbHeight)) book.thumbPath.clear();
+        }
       }
-      book.thumbPath = epub->getThumbBmpPath(thumbHeight);
-      if (!Storage.exists(book.thumbPath.c_str()) && !epub->generateThumbBmpFromSource(thumbHeight))
-        book.thumbPath.clear();
     } else if (FsHelpers::hasXtcExtension(book.path)) {
       auto xtc = makeUniqueNoThrow<Xtc>(book.path, "/.crosspoint");
       if (!xtc) {
         LOG_ERR("LIB", "OOM: XTC cover");
-        continue;
+      } else {
+        book.thumbPath = xtc->getThumbBmpPath(thumbHeight);
+        if (!Storage.exists(book.thumbPath.c_str())) {
+          beginGeneration();
+          if (!xtc->load() || !xtc->generateThumbBmp(thumbHeight)) book.thumbPath.clear();
+        }
       }
-      book.thumbPath = xtc->getThumbBmpPath(thumbHeight);
-      if (!Storage.exists(book.thumbPath.c_str()) && (!xtc->load() || !xtc->generateThumbBmp(thumbHeight)))
-        book.thumbPath.clear();
     }
+    ++done;
+    if (popupShown) updateLoadingPopup(done * 100 / total);
   }
   if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
+  // Repaint the page with its covers.
+  requestUpdate();
 }
 
 fui::CoverGridItem LibraryListActivity::shelfItemProvider(const uint16_t entry, void* user) {
@@ -1592,6 +1658,9 @@ void LibraryListActivity::render(RenderLock&& lock) {
     return;
   }
   UiTabListActivity::render(std::move(lock));
+  // The page is on screen with placeholders; missing covers are generated
+  // under a progress popup, then the page repaints.
+  if (shelfCoversPending) generateShelfCovers();
 }
 
 void LibraryListActivity::drawFooter() {

@@ -100,6 +100,30 @@ void serviceBuilder(uint32_t& workUnits) {
   if ((++workUnits & 0x1Fu) == 0) delay(1);
 }
 
+// Forwards rising percentages to the optional BuildProgress sink.
+class ProgressReporter {
+ public:
+  explicit ProgressReporter(const BuildProgress& sink) : sink(sink) {}
+
+  void report(const uint8_t percent) {
+    if (!sink.report || percent <= last) return;
+    last = percent;
+    sink.report(sink.context, percent);
+  }
+
+ private:
+  const BuildProgress& sink;
+  uint8_t last = 0;
+};
+
+// Share of the bar given to each phase: preparation, then the walk (where
+// EPUB metadata is read), then reconciliation, sorting and writing.
+constexpr uint8_t PROGRESS_WALK_START = 5;
+constexpr uint8_t PROGRESS_WALK_END = 85;
+constexpr uint8_t PROGRESS_RECONCILED = 88;
+constexpr uint8_t PROGRESS_SORTED = 92;
+constexpr uint8_t PROGRESS_DONE = 100;
+
 bool recoverInterruptedInstall() {
   if (!Storage.exists(BACKUP_PATH)) return true;
   if (!Storage.exists(INDEX_PATH)) {
@@ -277,6 +301,8 @@ struct WalkState {
   uint16_t priorCount = 0;
   uint16_t reused = 0;
   uint32_t serviceUnits = 0;
+  ProgressReporter* progress = nullptr;
+  uint16_t expectedBooks = 0;  // progress denominator; 0 = nothing to report against
 };
 
 // Bound to shownTitle when a book told us nothing. A `std::string()` temporary
@@ -457,6 +483,11 @@ int findPrior(WalkState& st, const uint64_t pathHash) {
 
   st.stageOut->write(&entry, STAGE_STRIDE);
   st.books++;
+  if (st.progress && st.expectedBooks > 0) {
+    const uint32_t done = std::min(st.books, st.expectedBooks);
+    st.progress->report(static_cast<uint8_t>(PROGRESS_WALK_START +
+                                             (PROGRESS_WALK_END - PROGRESS_WALK_START) * done / st.expectedBooks));
+  }
   return true;
 }
 
@@ -465,6 +496,35 @@ struct DedupFrame {
   uint16_t base;
   ~DedupFrame() { state.activeDedupCount = base; }
 };
+
+// Books a walk would stage, for progress when no previous index gives an
+// estimate. Same filters as walk(); no metadata, staging or deduplication.
+void countBooks(const std::string& path, const int depth, char* nameBuf, uint16_t& count, uint32_t& serviceUnits) {
+  if (depth > LIBRARY_MAX_DEPTH || count >= CLIX_MAX_RECORDS) return;
+  HalFile dir = Storage.open(path.c_str());
+  if (!dir || !dir.isDirectory()) return;
+  dir.rewindDirectory();
+  for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+    serviceBuilder(serviceUnits);
+    nameBuf[0] = '\0';
+    entry.getName(nameBuf, NAME_BUF_SIZE);
+    const bool isDir = entry.isDirectory();
+    const bool isEmpty = !isDir && entry.fileSize() == 0;
+    entry.close();
+    if (nameBuf[0] == '\0' || isHiddenOrSidecar(nameBuf)) continue;
+    if (isDir) {
+      // Like walk(): one directory handle open at a time.
+      const std::string child = joinLibraryPath(path, nameBuf);
+      const size_t resumePosition = dir.position();
+      dir.close();
+      countBooks(child, depth + 1, nameBuf, count, serviceUnits);
+      dir = Storage.open(path.c_str());
+      if (!dir || !dir.isDirectory() || !dir.seekSet(resumePosition)) return;
+      continue;
+    }
+    if (!isEmpty && isBookName(nameBuf) && ++count >= CLIX_MAX_RECORDS) return;
+  }
+}
 
 void walk(WalkState& st, const std::string& path, const int depth) {
   if (st.failed || depth > LIBRARY_MAX_DEPTH || st.books >= CLIX_MAX_RECORDS) return;
@@ -1253,10 +1313,13 @@ bool markLibraryIndexDirty() {
 
 bool isLibraryIndexDirty() { return dirtyInMemory || Storage.exists(DIRTY_PATH); }
 
-bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readMetadata) {
+bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readMetadata,
+                       const BuildProgress& progress) {
   const uint32_t startMs = millis();
   uint32_t serviceUnits = 0;
   stats = BuildStats{};
+  ProgressReporter reporter(progress);
+  reporter.report(1);
 
   Storage.mkdir(CACHE_DIR);
   if (!recoverInterruptedInstall()) return false;
@@ -1334,6 +1397,12 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
   st.readMetadata = readMetadata;
   st.previous = previous.isOpen() ? &previous : nullptr;
   st.stats = &stats;
+  st.progress = &reporter;
+  st.expectedBooks = st.priorCount;
+  if (st.expectedBooks == 0 && progress.report) {
+    countBooks(rootPath, 0, st.nameBuf, st.expectedBooks, serviceUnits);
+  }
+  reporter.report(PROGRESS_WALK_START);
 
   if (!Storage.openFileForWrite("LIBIDX", STAGE_PATH, st.stage) ||
       !Storage.openFileForWrite("LIBIDX", folderStagePath, st.folders)) {
@@ -1384,6 +1453,7 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
             static_cast<unsigned>(stats.metadataReused), static_cast<unsigned>(stats.parsed),
             static_cast<unsigned>(stats.walkMs));
     clearLibraryIndexDirty();
+    reporter.report(PROGRESS_DONE);
     return true;
   }
 
@@ -1471,6 +1541,7 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
     }
   }
   LOG_DBG("LIBIDX", "phase reconcile: %ums", static_cast<unsigned>(millis() - reconcileStartMs));
+  reporter.report(PROGRESS_RECONCILED);
 
   // --- title order -----------------------------------------------------------
   [[maybe_unused]] const uint32_t titleStartMs = millis();
@@ -1550,6 +1621,7 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
     }
   }
   LOG_DBG("LIBIDX", "phase title order: %ums", static_cast<unsigned>(millis() - titleStartMs));
+  reporter.report(PROGRESS_SORTED);
 
   [[maybe_unused]] const uint32_t emitStartMs = millis();
   const bool ok =
@@ -1566,7 +1638,10 @@ bool buildLibraryIndex(const char* rootPath, BuildStats& stats, const bool readM
           static_cast<unsigned>(stats.parsed), static_cast<unsigned>(stats.metadataReused),
           static_cast<unsigned>(stats.indexReplaced), static_cast<unsigned>(stats.duplicatesDropped),
           static_cast<unsigned>(stats.unreadableSkipped), static_cast<unsigned>(stats.walkMs));
-  if (ok) clearLibraryIndexDirty();
+  if (ok) {
+    clearLibraryIndexDirty();
+    reporter.report(PROGRESS_DONE);
+  }
   return ok;
 }
 
