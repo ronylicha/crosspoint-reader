@@ -1,8 +1,8 @@
 # CrossPoint Reader — fork Xteink X4 Pro, X4 et X3
 
-> Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) : **nouvelle interface à onglets**, **accueil en tuiles**, **statistiques de lecture**, **bibliothèque refondue** (étagères de couvertures, séries) et, sur le **Xteink X4 Pro** tactile, un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon**.
+> Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) : **nouvelle interface à onglets**, **accueil épuré**, **statistiques de lecture**, **bibliothèque refondue** (étagères de couvertures, séries) et, sur le **Xteink X4 Pro** tactile, un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon**.
 
-**Version actuelle : 1.6.5-games.7** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7).
+**Version actuelle : 1.6.5-games.8** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8).
 
 | Fichier | Liseuse |
 |---|---|
@@ -39,7 +39,7 @@ Le workflow est actif sur la branche par défaut `develop`. Un déclenchement ma
 Tout le firmware CrossPoint 1.6.5 officiel, **plus** :
 
 - **Une barre d'onglets à icônes** en haut de chaque écran principal : Accueil, Bibliothèque (sous-barre Bibliothèque | Fichiers, plus Catalogues si un serveur OPDS est configuré ou Plugins si des plugins sont installés), Jeux (écrans tactiles), Transfert de fichiers, Statistiques et Réglages (sous-barre Affichage | Lecteur | Commandes | Système). Elle remplace l'ancien menu d'accueil pour tous les thèmes.
-- **Un accueil en tuiles** : couverture et progression du livre en cours à côté des chiffres du jour (temps de lecture et pages, avec la tendance par rapport à la veille, jours d'affilée, livres terminés), histogramme des 7 derniers jours et livres récents.
+- **Un accueil épuré, sans cadres** : les sections flottent sur la page, séparées par des filets pointillés. Couverture et progression du livre en cours ; à côté, les chiffres du jour précédés de leur icône (temps de lecture et pages avec la tendance par rapport à la veille, jours d'affilée, livres terminés) ; histogramme des 7 derniers jours ; puis deux autres livres récents, soit trois livres à l'écran en portrait.
 - **Des statistiques de lecture** : onglet dédié avec le jour, la semaine, les totaux depuis le début et les livres lus récemment. La date et l'heure se règlent à la main dans les Réglages ; tant qu'elles sont inconnues, l'accueil et l'onglet Statistiques affichent un bouton **Régler la date**. Le détail du comptage figure dans le [guide utilisateur](./USER_GUIDE.md#39-reading-statistics).
 - **Un onglet « Jeux »** (X4 Pro uniquement) avec une carte illustrée par jeu et deux boutons de mode (2 joueurs, contre l'IA).
 - **Échecs** complets :
@@ -71,14 +71,14 @@ Le quatrième onglet **Séries** affiche des dossiers avec leur nom et leur nomb
 
 Activez **Réglages → Système → Utiliser les métadonnées** pour lire les séries et tomes renseignés dans les EPUB. Après un transfert ou une modification de ces informations, reconstruisez l'index. À la première ouverture avec Séries, l'ancien index est mis à jour automatiquement en conservant l'ordre d'arrivée des livres déjà connus. Si les métadonnées sont désactivées, les livres apparaissent dans **Sans série** après reconstruction.
 
-Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format, taille, série et tome. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD ; une couverture absente garde une vignette de remplacement.
+Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format, taille, série et tome. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD ; une couverture absente garde une vignette de remplacement. La construction de l'index et la préparation des couvertures manquantes affichent une barre de progression.
 
 Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
 
-Validation de la version 1.6.5-games.7 : **568 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
+Validation de la version 1.6.5-games.8 : **571 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
 
-- `firmware-x4pro-jeux.bin` : **5 911 344 octets**, `db6498a76c31ba2414bcf5c8ce7e4c7efdebb4a5e165a6468b409dabe357d22e`
-- `firmware-x4.bin` : **5 789 344 octets**, `2de15fd63f22954fc3c777ca3204902f9821dee73aa640d4728f6ef4d0ab3d3f`
+- `firmware-x4pro-jeux.bin` : **5 913 536 octets**, `daa99deff171f298652bf711fb97a778bb91b9cad68187d0755c3a273a74d8de`
+- `firmware-x4.bin` : **5 791 600 octets**, `b672fd94a8b8f204ef7f99172e3afc56f291439465c8b1e32738b8de0fde79d0`
 
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 

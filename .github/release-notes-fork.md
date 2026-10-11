@@ -3,7 +3,7 @@ Fork communautaire de CrossPoint Reader, basé sur la release officielle **${UPS
 ## Nouvelle interface
 - **Barre d'onglets à icônes** en haut de chaque écran principal : Accueil, Bibliothèque, Jeux (écrans tactiles), Transfert de fichiers, Statistiques et Réglages. Elle remplace l'ancien menu d'accueil, pour tous les thèmes.
 - **Sous-barres** : Bibliothèque | Fichiers (plus Catalogues OPDS ou Plugins selon la configuration), et les catégories Affichage | Lecteur | Commandes | Système dans les Réglages.
-- **Accueil en tuiles** : couverture et progression du livre en cours, chiffres du jour (temps de lecture et pages avec la tendance par rapport à la veille, jours d'affilée, livres terminés), histogramme des 7 derniers jours et livres récents.
+- **Accueil épuré, sans cadres** : les sections flottent sur la page, séparées par des filets pointillés. Couverture et progression du livre en cours ; à côté, les chiffres du jour avec leurs icônes (temps de lecture, pages, jours d'affilée, livres terminés) et la tendance par rapport à la veille ; histogramme des 7 derniers jours ; deux autres livres récents, soit trois livres à l'écran.
 - Interface entièrement construite avec FreeInkUI : le tactile du X4 Pro et les boutons passent par le même système.
 - Les anciens thèmes « Lyra Extended » et « Grille de couvertures », propres à l'ancien accueil, basculent automatiquement sur Lyra.
 
@@ -17,6 +17,8 @@ Fork communautaire de CrossPoint Reader, basé sur la release officielle **${UPS
 - Onglets **Récents, Titre, Auteur et Séries**, chacun dans les deux sens de tri, et recherche par titre ou auteur.
 - **Séries** : dossiers virtuels avec leur nombre de livres, tomes classés par numéro ; les livres sans série sont réunis dans **Sans série**.
 - Fiche détaillée par appui long : titre, auteur, série, tome, fichier, chemin, format, taille ; ouverture, suppression confirmée, réindexation.
+- **Chargement visible** : la construction de l'index et la préparation des couvertures affichent une barre de progression, au lieu d'un écran figé.
+- Libellés des onglets de tri en petite police : « Récents » et « Auteur » ne sont plus tronqués.
 
 ## Jeux (écrans tactiles uniquement)
 - **Échecs**, **Dames internationales 10×10** et **Backgammon**, en 2 joueurs ou contre l'IA, avec reprise des parties.

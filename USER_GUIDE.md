@@ -110,11 +110,12 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 Every top-level screen shares an icon tab bar under the clock and battery: **Home**, **Library**, **Games**, **File Transfer**, **[Statistics](#39-reading-statistics)** and **[Settings](#36-settings)**. The underlined icon is the current screen; tap another icon to switch. The Library tab opens a second bar with **Library** (selected) and **Files** ([Browse Files](#33-browse-files-screen)), plus **Catalogs** once an [OPDS server](#365-opds-servers-multiple-libraries) is configured. Settings keeps its Display, Reader, Controls and System bar under the tab bar.
 
-The Home screen is the main entry point to the firmware:
+The Home screen is the main entry point to the firmware. Its sections have no frames; whitespace and dotted lines separate them:
 
-* **Current book tile:** the cover, title and progress of the most recently read book, beside today's reading figures — reading time, pages, day streak and books finished. An arrow shows whether today is ahead of or behind yesterday, with the difference. Opening the tile resumes the book.
+* **Current book:** the cover, title and progress of the most recently read book. Tap the cover to resume it.
+* **Today's figures**, beside the cover, each with its icon: reading time (clock), pages (open book), day streak (flame) and books finished (book with a check mark). An arrow shows whether today is ahead of or behind yesterday, with the difference. Tap the figures to open the Statistics tab.
 * **Last 7 days:** reading time per day, today in black, with the week's total. Tap it to open the Statistics tab.
-* **Recent books:** the next books read, with their author, progress, or **Completed**.
+* **Recent books:** on a portrait screen, the two next books read, with their author, progress, or **Completed**; three books appear in total with the current one.
 
 On button devices, the side buttons move between the books, front **Left**/**Right** walk the tab bar, and **Confirm** opens the selection. **Back** resumes the last book. On other top-level screens, **Back** returns Home.
 
@@ -133,9 +134,9 @@ The Browse Files screen acts as a file and folder browser. Open it from the **Li
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The shelves and the **Series** tab are part of [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The shelves and the **Series** tab are part of [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
 
-Four tabs organise the books. The arrow beside the active tab shows the sort direction:
+Four tabs organise the books; their labels use the small font so that each one stays whole beside its sort arrow. The arrow beside the active tab shows the sort direction:
 
 - **Recent** orders books by recency. With newest first and no search active, the reading history appears at the top, followed by the remaining indexed books.
 - **Title** sorts titles A-Z or Z-A.
@@ -159,11 +160,11 @@ On a touch device, tap a cover to open its book. Swipe up or down to move to ano
 
 The details popup shows the available title, author, filename, location on the SD card, format, indexed file size, series, and volume number. **Book actions** is available from the first page to open the book, refresh the library, delete the file with confirmation, or remove it from reading history when applicable. Choose **More details** if the information spans several pages. Removing a book from Recent keeps its file on the SD card. Press **Back** to close the popup.
 
-Cover thumbnails are cached on the SD card and prepared one at a time. A book without a usable cover keeps a placeholder and remains accessible. Enable **Settings → System → Use Book Metadata** to read series and volume information stored in EPUBs, including metadata written by Calibre and EPUB 3 series collections. With metadata disabled, rebuilding puts books in **No series**. A filename does not define a series.
+Cover thumbnails are cached on the SD card. When a page shows covers that are not cached yet, it appears with placeholders, then a **Preparing covers** window with a progress bar generates them before the page is redrawn. Building the index shows **Reading your books** with a progress bar as well. A book without a usable cover keeps a placeholder and remains accessible. Enable **Settings → System → Use Book Metadata** to read series and volume information stored in EPUBs, including metadata written by Calibre and EPUB 3 series collections. With metadata disabled, rebuilding puts books in **No series**. A filename does not define a series.
 
 The index is created automatically the first time the Library is opened. When upgrading to Series, the previous index is rebuilt automatically while preserving the arrival history of known books. After transferring a new volume, changing metadata, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. Updated metadata in Calibre must be transferred in the EPUB before refreshing the library.
 
-The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **568 tests**. The X4 Pro and X4/X3 builds succeed without warnings. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **571 tests**. The X4 Pro and X4/X3 builds succeed without warnings. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 

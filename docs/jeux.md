@@ -82,7 +82,7 @@ Le plateau seul ne suffit pas à reprendre un tour. La sauvegarde conserve aussi
 
 Les vérifications logicielles passent : **495 tests hôte**, dont **45 scénarios jeux** avec contrôle tactile en portrait et paysage. Les 45 scénarios passent aussi sous ASan/UBSan sans diagnostic. La compilation X4 Pro réussit ; la revue de non-régression finale n’a relevé aucun problème dans le périmètre contrôlé.
 
-Les jeux sont publiés dans `firmware-x4pro-jeux.bin` de la [release v1.6.5-games.7](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.7) ; taille et empreinte figurent dans le [README](../README.md#bibliothèque-sur-étagères).
+Les jeux sont publiés dans `firmware-x4pro-jeux.bin` de la [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8) ; taille et empreinte figurent dans le [README](../README.md#bibliothèque-sur-étagères).
 
 Aucun essai physique ni mesure de mémoire disponible pendant le jeu n’a été réalisé. Les contrôles suivants restent à faire sur l’appareil :
 
