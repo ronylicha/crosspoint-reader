@@ -19,6 +19,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
+#include "network/KOReaderAutoSync.h"
 #include "util/PluginEvents.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -64,6 +65,8 @@ void ReaderActivity::notePageTurn(const bool forward, const bool succeeded) {
 }
 
 void ReaderActivity::onEnter() {
+  // The book needs the heap a background KOReader push would hold.
+  koreaderautosync::stopAndWait();
   Activity::onEnter();
 
   // Heap ledger for field crash reports: free vs largest block distinguishes a
@@ -117,6 +120,7 @@ void ReaderActivity::onExit() {
   // durable before a subscriber can act on the exit notification.
   flushReaderSession();
   flushReadingStatsLocked();
+  queueKOReaderProgress(sleepPrepared);
 
   if (pluginevents::anySubscriber(pluginevents::Event::ReaderExit)) {
     char percent[8];
@@ -136,6 +140,8 @@ void ReaderActivity::onExit() {
 void ReaderActivity::prepareForSleep() {
   flushReaderSession();
   flushReadingStatsLocked();
+  sleepPrepared = true;
+  queueKOReaderProgress(true);
 }
 
 void ReaderActivity::flushReadingStatsLocked() {

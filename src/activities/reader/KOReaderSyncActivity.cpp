@@ -24,6 +24,7 @@
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"  // list icons for the compare rows
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "network/WifiPowerSaveGuard.h"
 
 namespace fui = freeink::ui;
@@ -402,6 +403,7 @@ void KOReaderSyncActivity::performUpload() {
 }
 
 void KOReaderSyncActivity::onEnter() {
+  koreaderautosync::stopAndWait();  // foreground takes the radio
   Activity::onEnter();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 

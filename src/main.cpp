@@ -38,6 +38,7 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/PluginEvents.h"
@@ -343,6 +344,9 @@ void enterDeepSleep(bool fromTimeout = false) {
   // floor now so a later cold boot resumes from it.
   trustedtime::note();
 
+  // The plugin delivery below and the KOReader push after goToSleep() both
+  // need the radio: take it back from a background push first.
+  koreaderautosync::stopAndWait();
   deliverSleepPluginEvents();
 
   const bool isQuickResumeSleep =
@@ -366,6 +370,10 @@ void enterDeepSleep(bool fromTimeout = false) {
     // A stale Quick Resume frame must not replace the selected sleep screen during wake.
     Storage.remove(SLEEP_FRAME_FILE);
   }
+
+  // The book is closed (its position queued by onExit) and the sleep screen
+  // is up: push queued KOReader progress within a bounded budget.
+  koreaderautosync::deliverBeforeSleep();
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
@@ -519,6 +527,7 @@ void setup() {
   READING_STATS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
+  koreaderautosync::begin();
   OPDS_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
@@ -699,6 +708,7 @@ void loop() {
   }
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
+  koreaderautosync::poll(activityManager.isReaderActivity());
 
   // Under the render lock, so a step never overlaps the themes' gauge reads.
   static bool gaugeCapacityPending = true;

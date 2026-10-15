@@ -32,6 +32,7 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
@@ -47,6 +48,7 @@
 #include "activities/settings/TextSettingsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
@@ -1057,6 +1059,90 @@ bool EpubReaderActivity::launchKOReaderSync() {
   return true;
 }
 
+namespace {
+// The page set aside while the chapter mapper borrows the framebuffer.
+constexpr char FRAME_STASH_PATH[] = "/.crosspoint/koreader_frame.tmp";
+
+bool stashFrame(const GfxRenderer& renderer) {
+  HalFile file;
+  if (!Storage.openFileForWrite("KOAUTO", FRAME_STASH_PATH, file)) return false;
+  const size_t size = renderer.getBufferSize();
+  return file.write(renderer.getFrameBuffer(), size) == size;
+}
+
+void restoreFrame(const GfxRenderer& renderer) {
+  bool restored = false;
+  {
+    HalFile file;
+    if (Storage.openFileForRead("KOAUTO", FRAME_STASH_PATH, file)) {
+      const size_t size = renderer.getBufferSize();
+      restored = file.read(renderer.getFrameBuffer(), size) == static_cast<int>(size);
+      file.close();  // before the remove below
+    }
+  }
+  Storage.remove(FRAME_STASH_PATH);
+  if (!restored) LOG_ERR("KOAUTO", "Could not restore the page after mapping the position");
+}
+}  // namespace
+
+void EpubReaderActivity::queueKOReaderProgress(const bool preserveFrame) {
+  if (!KOREADER_STORE.hasCredentials() || !epub || !section) return;
+  const int page = section->currentPage;
+  // Nothing read this session, or this exact position is already queued.
+  if (sessionStartSpineIndex < 0 || (currentSpineIndex == sessionStartSpineIndex && page == sessionStartPage)) return;
+  if (currentSpineIndex == lastQueuedSpineIndex && page == lastQueuedPage) return;
+
+  // The mapper uses the framebuffer as scratch. Before sleep the page in it
+  // is the sleep screen's Quick Resume or transparent backdrop: keep a copy on
+  // the card, or queue nothing rather than blank it.
+  if (preserveFrame && !stashFrame(renderer)) {
+    LOG_ERR("KOAUTO", "Cannot set the page aside; position not queued");
+    Storage.remove(FRAME_STASH_PATH);
+    return;
+  }
+  const CrossPointPosition position = getCurrentPosition();
+  SavedProgressPosition mapped;
+  {
+    // No rendering may run while the chapter mapper borrows the framebuffer.
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    mapped = ProgressMapper::toSavedProgress(epub, position);
+  }
+  if (preserveFrame) restoreFrame(renderer);
+
+  koreader::QueuedProgress entry;
+  entry.bookPath = epub->getPath();
+  entry.document = KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME
+                       ? KOReaderDocumentId::calculateFromFilename(entry.bookPath)
+                       : KOReaderDocumentId::calculate(entry.bookPath);
+  entry.xpath = std::move(mapped.xpath);
+  entry.percentage = mapped.percentage;
+  entry.spineIndex = static_cast<uint16_t>(position.spineIndex);
+  entry.pageNumber = static_cast<uint16_t>(position.pageNumber);
+  entry.totalPages = static_cast<uint16_t>(position.totalPages > 0 ? position.totalPages : 1);
+  if (position.hasParagraphIndex) entry.paragraphIndex = position.paragraphIndex;
+  if (KOREADER_STORE.getSendMetadata()) {
+    // The push runs after the book is closed: capture what needs the EPUB now.
+    KOReaderMetadata metadata;
+    const auto lastSlash = entry.bookPath.rfind('/');
+    metadata.filename = lastSlash != std::string::npos ? entry.bookPath.substr(lastSlash + 1) : entry.bookPath;
+    metadata.title = epub->getTitle();
+    metadata.authors = epub->getAuthor();
+    if (KOREADER_STORE.supportsExtendedMetadata()) {
+      Epub::SyncMetadata syncMetadata;
+      if (epub->loadSyncMetadata(syncMetadata)) {
+        metadata.isbn = std::move(syncMetadata.isbn);
+        metadata.asin = std::move(syncMetadata.asin);
+        metadata.series = std::move(syncMetadata.series);
+        metadata.seriesIndex = syncMetadata.seriesIndex;
+      }
+    }
+    entry.metadata = std::move(metadata);
+  }
+  koreaderautosync::enqueue(std::move(entry));
+  lastQueuedSpineIndex = currentSpineIndex;
+  lastQueuedPage = page;
+}
+
 void EpubReaderActivity::applyInitialOrientation() {
   ReaderActivity::applyInitialOrientation();
   appliedOrientation = SETTINGS.orientation;
@@ -1582,6 +1668,10 @@ void EpubReaderActivity::renderBook() {
       lastSavedSpineIndex = currentSpineIndex;
       lastSavedPage = section->currentPage;
       lastSavedPageCount = section->estimatedTotalPages();
+      if (sessionStartSpineIndex < 0) {
+        sessionStartSpineIndex = lastSavedSpineIndex;
+        sessionStartPage = lastSavedPage;
+      }
     }
   }
 

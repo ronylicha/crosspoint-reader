@@ -54,6 +54,16 @@ class ReaderActivity : public Activity {
   // the format has no chapters. Read on the render task.
   virtual int statsChapterIndex() const { return -1; }
 
+  // Queues the current position for the automatic KOReader push when the
+  // reader moved during this session. Formats KOReader cannot place (XTC) keep
+  // the no-op. Runs under the render lock from onExit and prepareForSleep.
+  // `preserveFrame`: the sleep screen may keep the page in the framebuffer,
+  // so any use of it as scratch must give the page back intact.
+  virtual void queueKOReaderProgress(bool preserveFrame) { (void)preserveFrame; }
+  // Set once the reader prepares for sleep: its onExit then runs on the way
+  // into the sleep screen.
+  bool sleepPrepared = false;
+
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
   virtual bool skipPages(int amount) { return pageTurn(amount > 0); }

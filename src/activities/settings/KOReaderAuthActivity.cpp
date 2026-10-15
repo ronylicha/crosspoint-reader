@@ -12,6 +12,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "network/WifiPowerSaveGuard.h"
 
 void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
@@ -54,6 +55,7 @@ void KOReaderAuthActivity::performAuthentication() {
 }
 
 void KOReaderAuthActivity::onEnter() {
+  koreaderautosync::stopAndWait();  // foreground takes the radio
   Activity::onEnter();
 
   // Check if already connected

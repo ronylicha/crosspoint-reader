@@ -120,6 +120,12 @@ class EpubReaderActivity final : public ReaderActivity {
   int lastSavedSpineIndex = -1;
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
+  // First saved position of this session, and the last one queued for the
+  // KOReader push: opening a book without moving never overwrites the server.
+  int sessionStartSpineIndex = -1;
+  int sessionStartPage = -1;
+  int lastQueuedSpineIndex = -1;
+  int lastQueuedPage = -1;
 
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
@@ -212,6 +218,7 @@ class EpubReaderActivity final : public ReaderActivity {
   std::string getBookThumbBmpPath() const override { return epub ? epub->getThumbBmpPath() : ""; }
   int getProgressBasisPoints() const override;
   int statsChapterIndex() const override { return currentSpineIndex; }
+  void queueKOReaderProgress(bool preserveFrame) override;
   void renderBook() override;
   void onEndOfBookRendered() override;
 

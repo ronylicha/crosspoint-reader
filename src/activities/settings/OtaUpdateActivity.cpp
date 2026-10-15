@@ -9,6 +9,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "network/OtaUpdater.h"
 
 void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
@@ -73,6 +74,7 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 }
 
 void OtaUpdateActivity::onEnter() {
+  koreaderautosync::stopAndWait();  // foreground takes the radio
   Activity::onEnter();
 
   // Turn on WiFi immediately

@@ -17,6 +17,7 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/KOReaderAutoSync.h"
 #include "util/PluginEvents.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
@@ -64,6 +65,7 @@ int barsForRssi(int rssi, int currentBars) {
 }  // namespace
 
 void CrossPointWebServerActivity::onEnter() {
+  koreaderautosync::stopAndWait();  // foreground takes the radio
   Activity::onEnter();
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());

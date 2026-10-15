@@ -7,10 +7,13 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
+#include "network/KOReaderAutoSync.h"
 
 namespace fui = freeink::ui;
 
 void UsbDriveActivity::onEnter() {
+  // The host takes the card: no background push may write its queue now.
+  koreaderautosync::stopAndWait();
   Activity::onEnter();
   resetUi();
   app.setScreen(&UsbDriveActivity::driveScreen, this);

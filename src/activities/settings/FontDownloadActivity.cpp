@@ -22,6 +22,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/KOReaderAutoSync.h"
 
 namespace fui = freeink::ui;
 
@@ -71,6 +72,7 @@ void FontDownloadActivity::onBackButton() {
 // --- Lifecycle ---
 
 void FontDownloadActivity::onEnter() {
+  koreaderautosync::stopAndWait();  // foreground takes the radio
   UiListActivity::onEnter();
   WiFi.mode(WIFI_STA);
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
