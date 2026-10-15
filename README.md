@@ -2,7 +2,7 @@
 
 > Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) : **nouvelle interface à onglets**, **accueil épuré**, **statistiques de lecture**, **bibliothèque refondue** (étagères de couvertures, séries) et, sur le **Xteink X4 Pro** tactile, un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon**.
 
-**Version actuelle : 1.6.5-games.8** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8).
+**Version actuelle : 1.6.5-games.9** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.9](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.9).
 
 | Fichier | Liseuse |
 |---|---|
@@ -40,6 +40,8 @@ Tout le firmware CrossPoint 1.6.5 officiel, **plus** :
 
 - **Une barre d'onglets à icônes** en haut de chaque écran principal : Accueil, Bibliothèque (sous-barre Bibliothèque | Fichiers, plus Catalogues si un serveur OPDS est configuré ou Plugins si des plugins sont installés), Jeux (écrans tactiles), Transfert de fichiers, Statistiques et Réglages (sous-barre Affichage | Lecteur | Commandes | Système). Elle remplace l'ancien menu d'accueil pour tous les thèmes.
 - **Un accueil épuré, sans cadres** : les sections flottent sur la page, séparées par des filets pointillés. Couverture et progression du livre en cours ; à côté, les chiffres du jour précédés de leur icône (temps de lecture et pages avec la tendance par rapport à la veille, jours d'affilée, livres terminés) ; histogramme des 7 derniers jours ; puis deux autres livres récents, soit trois livres à l'écran en portrait.
+- **Une pastille de tome** (**T1**, **T2**…) en haut à droite des couvertures de la bibliothèque et de celle du livre en cours à l'accueil, pour les livres d'une série.
+- **Une synchronisation KOReader automatique** : dès qu'un compte est configuré, la position du livre est envoyée à la fermeture et à la mise en veille, sans écran d'attente. La position locale remplace celle du serveur. Sans réseau, les positions s'accumulent sur la carte SD (une par livre) et partent toutes à la connexion suivante. Sur X4 Pro l'envoi se fait en tâche de fond ; sur X4/X3, au moment de la mise en veille. Détails dans le [guide utilisateur](./USER_GUIDE.md#automatic-progress-upload).
 - **Des statistiques de lecture** : onglet dédié avec le jour, la semaine, les totaux depuis le début et les livres lus récemment. La date et l'heure se règlent à la main dans les Réglages ; tant qu'elles sont inconnues, l'accueil et l'onglet Statistiques affichent un bouton **Régler la date**. Le détail du comptage figure dans le [guide utilisateur](./USER_GUIDE.md#39-reading-statistics).
 - **Un onglet « Jeux »** (X4 Pro uniquement) avec une carte illustrée par jeu et deux boutons de mode (2 joueurs, contre l'IA).
 - **Échecs** complets :
@@ -75,10 +77,10 @@ Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer m
 
 Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
 
-Validation de la version 1.6.5-games.8 : **571 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
+Validation de la version 1.6.5-games.9 : **575 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
 
-- `firmware-x4pro-jeux.bin` : **5 913 536 octets**, `daa99deff171f298652bf711fb97a778bb91b9cad68187d0755c3a273a74d8de`
-- `firmware-x4.bin` : **5 791 600 octets**, `b672fd94a8b8f204ef7f99172e3afc56f291439465c8b1e32738b8de0fde79d0`
+- `firmware-x4pro-jeux.bin` : **5 925 264 octets**, `dedbde17a3d13f1a2bde04c235d70891fc38fafc46135cf9d20995bf9bddffe5`
+- `firmware-x4.bin` : **5 803 520 octets**, `0f4412886e086718096b464a6c597398b4e8a16db87c3f02881a1252c6568944`
 
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 

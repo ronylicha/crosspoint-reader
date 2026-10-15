@@ -651,3 +651,34 @@ from 1970-01-01; `0` means the date was unknown and never appears in `days`.
 - Loading sorts and caps both lists and drops duplicate days or paths, so a
   hand-edited file cannot break these invariants. Deleting the file resets
   the statistics.
+
+## KOReader upload queue (`.crosspoint/koreader_queue.json`)
+
+JSON written by the `KOReaderQueueStore` in `src/network/KOReaderAutoSync.cpp`
+through `PersistableStore`; the queue itself is
+`lib/KOReaderSync/ProgressQueue`. It holds the local positions not yet pushed
+to the KOReader sync server.
+
+```json
+{
+  "version": 1,
+  "next": 8,
+  "entries": [
+    { "doc": "5d41402abc4b2a76b9719d911017c592", "path": "/Books/a.epub",
+      "xpath": "/body/DocFragment[4]/body/p[12]/text().0", "pct": 0.42,
+      "spine": 3, "page": 7, "pages": 18, "para": 12, "rev": 7,
+      "meta": { "file": "a.epub", "title": "A", "authors": "B",
+                "isbn": "", "asin": "", "series": "", "seriesIndex": 2 } }
+  ]
+}
+```
+
+- One entry per document hash (`doc`); a newer local position replaces the
+  queued one. Entries are oldest first, at most 12: a thirteenth book drops
+  the oldest.
+- `rev` is assigned on every update. An uploader removes an entry only when
+  its revision is unchanged, so a position queued during the upload is kept.
+- `meta` is present when **Send metadata** is on; it is captured when the
+  book closes because the upload runs later. `para` and `seriesIndex` are
+  optional.
+- Deleting the file drops pending uploads; it never affects local progress.

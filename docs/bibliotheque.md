@@ -1,12 +1,12 @@
 # Bibliothèque : couvertures sur étagères
 
-La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.9](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.9), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
 
 ## Accès
 
 Touchez l'icône **Bibliothèque** de la barre d'onglets, en haut de l'écran. Une seconde barre propose **Bibliothèque** (sélectionnée), **Fichiers** (le navigateur de la carte SD) et, si un plugin est installé ou un serveur OPDS configuré, **Plugins** ou **Catalogues**. Les boutons **Recherche** et **Actualiser** se trouvent à droite de cette barre ; sur un appareil à boutons, seule la recherche y figure. Une recherche active ou une série ouverte s'affiche sur une ligne en dessous : touchez-la, ou sa flèche, pour revenir en arrière.
 
-La bibliothèque affiche les livres sous forme de couvertures posées sur trois étagères. Chaque page contient jusqu'à **12 livres : quatre colonnes et trois rangées**. Les emplacements restants restent vides sur la dernière page. Un cadre indique le livre sélectionné.
+La bibliothèque affiche les livres sous forme de couvertures posées sur trois étagères. Un livre qui a un numéro de tome porte une pastille **T1**, **T2**… en haut à droite de sa couverture ; la même pastille apparaît sur la couverture du livre en cours, à l'accueil. Chaque page contient jusqu'à **12 livres : quatre colonnes et trois rangées**. Les emplacements restants restent vides sur la dernière page. Un cadre indique le livre sélectionné.
 
 ## Retrouver un livre
 
@@ -75,7 +75,7 @@ Après avoir ajouté, renommé ou déplacé des livres sur la carte SD, utilisez
 
 ## Vérification sur liseuse
 
-La suite complète passe avec **571 tests hôte**. Les compilations X4 Pro et X4/X3 réussissent sans avertissement. Aucun résultat matériel n'est acquis.
+La suite complète passe avec **575 tests hôte**. Les compilations X4 Pro et X4/X3 réussissent sans avertissement. Aucun résultat matériel n'est acquis.
 
 Les tailles et empreintes des deux binaires figurent dans le [README](../README.md#bibliothèque-sur-étagères). Pour l'installation, suivez les [instructions du README](../README.md#installation).
 

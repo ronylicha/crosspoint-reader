@@ -18,7 +18,13 @@ Fork communautaire de CrossPoint Reader, basé sur la release officielle **${UPS
 - **Séries** : dossiers virtuels avec leur nombre de livres, tomes classés par numéro ; les livres sans série sont réunis dans **Sans série**.
 - Fiche détaillée par appui long : titre, auteur, série, tome, fichier, chemin, format, taille ; ouverture, suppression confirmée, réindexation.
 - **Chargement visible** : la construction de l'index et la préparation des couvertures affichent une barre de progression, au lieu d'un écran figé.
+- **Pastille de tome** (T1, T2…) sur les couvertures des livres d'une série, aussi sur le livre en cours de l'accueil.
 - Libellés des onglets de tri en petite police : « Récents » et « Auteur » ne sont plus tronqués.
+
+## Synchronisation KOReader automatique
+- Dès qu'un compte KOReader est configuré, la position est envoyée **à la fermeture du livre et à la mise en veille**, sans écran d'attente. La position locale remplace celle du serveur ; ouvrir un livre sans tourner de page n'envoie rien.
+- **Sans réseau**, les positions sont conservées sur la carte SD, une par livre (jusqu'à 12), et partent toutes à la connexion suivante.
+- **X4 Pro** : envoi en tâche de fond dès la fermeture du livre, pendant que la liseuse reste utilisable. **X4/X3** : envoi au moment de la mise en veille, pour préserver la mémoire pendant la lecture.
 
 ## Jeux (écrans tactiles uniquement)
 - **Échecs**, **Dames internationales 10×10** et **Backgammon**, en 2 joueurs ou contre l'IA, avec reprise des parties.

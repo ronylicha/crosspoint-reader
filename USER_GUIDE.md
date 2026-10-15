@@ -112,7 +112,7 @@ Every top-level screen shares an icon tab bar under the clock and battery: **Hom
 
 The Home screen is the main entry point to the firmware. Its sections have no frames; whitespace and dotted lines separate them:
 
-* **Current book:** the cover, title and progress of the most recently read book. Tap the cover to resume it.
+* **Current book:** the cover, title and progress of the most recently read book. A badge in the cover's top-right corner shows its volume number (for example **#3**, **T3** in French) when the book belongs to an indexed series. Tap the cover to resume it.
 * **Today's figures**, beside the cover, each with its icon: reading time (clock), pages (open book), day streak (flame) and books finished (book with a check mark). An arrow shows whether today is ahead of or behind yesterday, with the difference. Tap the figures to open the Statistics tab.
 * **Last 7 days:** reading time per day, today in black, with the week's total. Tap it to open the Statistics tab.
 * **Recent books:** on a portrait screen, the two next books read, with their author, progress, or **Completed**; three books appear in total with the current one.
@@ -134,7 +134,7 @@ The Browse Files screen acts as a file and folder browser. Open it from the **Li
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. The shelves and the **Series** tab are part of [release v1.6.5-games.8](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.8), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. A book with a volume number carries a badge in its cover's top-right corner (**#3**, or **T3** in French). The shelves and the **Series** tab are part of [release v1.6.5-games.9](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.9), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
 
 Four tabs organise the books; their labels use the small font so that each one stays whole beside its sort arrow. The arrow beside the active tab shows the sort direction:
 
@@ -164,7 +164,7 @@ Cover thumbnails are cached on the SD card. When a page shows covers that are no
 
 The index is created automatically the first time the Library is opened. When upgrading to Series, the previous index is rebuilt automatically while preserving the arrival history of known books. After transferring a new volume, changing metadata, moving, or renaming books, use the book actions menu to refresh the library or **Settings → System → Rebuild library index**. Updated metadata in Calibre must be transferred in the EPUB before refreshing the library.
 
-The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **571 tests**. The X4 Pro and X4/X3 builds succeed without warnings. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
+The [French library guide](docs/bibliotheque.md) includes the commands and the checks to run on the reader. The complete host suite passes with **575 tests**. The X4 Pro and X4/X3 builds succeed without warnings. No physical-device test has been performed; these checks do not establish how series folders, twelve covers, or long detail pages look on the reader's E-Ink screen.
 
 ### 3.5 File Transfer Screen
 
@@ -447,6 +447,18 @@ When **Sync Server URL** is left empty, CrossPoint uses the free CrossPoint sync
    - On the first device, run **Sign Up** once to create the account directly from the device. On every other device, just run **Authenticate**.
 
 Accounts are per server. Existing `sync.koreader.rocks` credentials do not exist on the CrossPoint server; either sign up again with the same username/password or use Option B to keep using the legacy server.
+
+##### Automatic progress upload
+
+Once a KOReader account is configured, CrossPoint pushes your position on its own, without opening the sync screen. **The local position always wins**: it replaces the position stored on the server.
+
+- **When:** each time you close an EPUB, and when the reader goes to sleep. Opening a book and closing it without turning a page sends nothing, so a quick look never overwrites progress made on another device.
+- **How:** the position is first saved in a queue on the SD card (`/.crosspoint/koreader_queue.json`), one entry per book, keeping only the latest position of each book (up to 12 books). Every queued book is sent the next time the reader can reach the network, together with the current one.
+- **Network:** the reader joins the last WiFi network it connected to. Without that network, without an account, or below 20% battery, the positions stay queued and are retried later.
+- **X4 Pro:** the upload runs in the background right after you close the book (or within a few seconds when you are on another screen), while you keep using the reader. Opening a WiFi screen, the file transfer or USB mode stops it first. After a failed attempt it waits five minutes before trying again, unless you close another book.
+- **X4 / X3:** to keep memory free for reading, these readers upload only when going to sleep: once the sleep screen is shown, they connect (10 seconds at most), send the queue for up to about 15 seconds, then sleep. A book the server refuses stays queued and is retried later.
+
+XTC books are not uploaded: KOReader cannot locate a position in them.
 
 ##### Option B: Legacy Public KOReader Server (`sync.koreader.rocks`)
 
