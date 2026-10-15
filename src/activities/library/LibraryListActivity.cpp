@@ -25,6 +25,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
+#include "components/VolumeBadge.h"
 #include "components/icons/headerIcons.h"
 #include "components/icons/listIcons.h"
 #include "components/icons/search24.h"
@@ -1188,6 +1189,7 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
   book.path.clear();
   book.thumbPath.clear();
   book.fileSize = 0;
+  book.volume.reset();
   if (seriesFoldersVisible() || entry < 0 || entry >= bookRowCount()) return false;
   const int pinned = pinnedCount();
   uint16_t ordinal = 0xFFFF;
@@ -1209,6 +1211,7 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
     if (book.title.empty() && (!index.readTitle(record, book.title) || book.title.empty()))
       index.readName(record, book.title);
     if (book.author.empty()) index.readAuthor(record, book.author);
+    if (!index.readSeriesIndex(record, book.volume)) book.volume.reset();
   }
   if (book.path.empty()) return false;
   if (book.title.empty()) book.title = tr(STR_LIBRARY_UNKNOWN_TITLE);
@@ -1326,6 +1329,7 @@ bool LibraryListActivity::paintShelfCover(const fui::Rect rect, const uint16_t e
     shelfCoverFile.close();
   }
   if (!drawn) GUI.drawCoverPlaceholder(renderer, Rect{rect.x, rect.y, rect.width, rect.height});
+  volumebadge::draw(renderer, Rect{rect.x, rect.y, rect.width, rect.height}, book.volume, SMALL_FONT_ID);
   return true;
 }
 

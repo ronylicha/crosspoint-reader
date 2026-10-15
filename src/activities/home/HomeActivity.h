@@ -3,6 +3,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -71,6 +72,9 @@ class HomeActivity final : public Activity, private UiAppHost {
 
   void loadBooks();
   void loadFigures();
+  // Series volume of the current book, from the library index (none when the
+  // book is not indexed or has no volume).
+  static std::optional<float> lookupVolume(const std::string& path);
   void prepareCovers(const Layout& layout);
   bool ensureThumb(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
 
@@ -98,6 +102,7 @@ class HomeActivity final : public Activity, private UiAppHost {
   std::array<bool, MAX_BOOKS> finished{};
   std::array<std::string, MAX_BOOKS> coverPaths;
   TodayFigures figures;
+  std::optional<float> heroVolume;
   int selection = 0;
   int preparedHeroHeight = 0;
   bool coversReady = false;

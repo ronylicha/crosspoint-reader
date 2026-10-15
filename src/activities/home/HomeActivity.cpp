@@ -6,6 +6,8 @@
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryBuilder.h>
+#include <LibraryIndexFile.h>
 #include <Memory.h>
 #include <Xtc.h>
 #include <components/controls/button.h>
@@ -19,6 +21,7 @@
 #include "activities/settings/DateTimeSettingsActivity.h"
 #include "components/StatsWidgets.h"
 #include "components/UITheme.h"
+#include "components/VolumeBadge.h"
 #include "components/icons/appIcons.h"
 #include "components/icons/book.h"
 #include "fontIds.h"
@@ -120,6 +123,31 @@ void HomeActivity::loadBooks() {
     const readingstats::BookTotals* stats = READING_STATS.log().book(books[i].path);
     finished[i] = progress[i] >= 100 || (stats && stats->finished);
   }
+  heroVolume = books.empty() ? std::nullopt : lookupVolume(books[0].path);
+}
+
+std::optional<float> HomeActivity::lookupVolume(const std::string& path) {
+  // Size first: the index holds the card's reader while it is open.
+  library::BookIdentity identity{library::clixPathHash(path.data(), path.size()), 0};
+  {
+    HalFile file;
+    if (Storage.openFileForRead("HOME", path.c_str(), file)) identity.fileSize = static_cast<uint32_t>(file.fileSize());
+  }
+  auto index = makeUniqueNoThrow<library::LibraryIndexFile>();
+  if (!index) {
+    LOG_ERR("HOME", "OOM: library index");
+    return std::nullopt;
+  }
+  if (!index->open(library::libraryIndexPath())) return std::nullopt;
+  uint16_t row = 0xFFFF;
+  if (!index->recentRowsFor(&identity, 1, &row) || row == 0xFFFF) return std::nullopt;
+  const uint16_t ordinal = index->ordinalForRow(library::SortOrder::RecentAsc, row);
+  library::ClixRecord record{};
+  std::optional<float> volume;
+  if (ordinal == 0xFFFF || !index->readRecord(ordinal, record) || !index->readSeriesIndex(record, volume)) {
+    return std::nullopt;
+  }
+  return volume;
 }
 
 void HomeActivity::loadFigures() {
@@ -271,6 +299,8 @@ void HomeActivity::drawHero(const Layout& layout) {
                                      UITheme::TextVerticalAlignment::TOP);
   } else {
     drawCover(cover, 0);
+    // Over the cached cover, never baked into the cache's snapshot.
+    volumebadge::draw(renderer, cover, heroVolume, UI_10_FONT_ID);
     const Rect& caption = layout.heroCaption;
     char percent[8];
     snprintf(percent, sizeof(percent), "%d%%", std::max(0, progress[0]));

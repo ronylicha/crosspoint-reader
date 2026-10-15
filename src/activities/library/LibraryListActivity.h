@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -137,6 +138,7 @@ class LibraryListActivity final : public UiTabListActivity {
     std::string path;
     std::string thumbPath;
     uint32_t fileSize = 0;
+    std::optional<float> volume;  // series volume, shown as a badge on the cover
   };
   bool resolveBook(int entry, ShelfBook& book);
   // Resolves the page's books and their existing thumbnails. Missing ones are
