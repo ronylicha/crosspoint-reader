@@ -1253,6 +1253,51 @@ void LibraryListActivity::prepareShelf(const int top, const int thumbHeight) {
   shelfCoversPending = !shelfCovers.load(covers, static_cast<size_t>(shelfCount), thumbHeight, missing);
   for (int slot = 0; slot < shelfCount; ++slot) shelfCoverMissing[static_cast<size_t>(slot)] = missing[slot];
   if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
+
+#ifdef BOARD_HAS_PSRAM
+  const int count = bookRowCount();
+  const int next = library::shelf::nextPageTop(top, count);
+  const int previous = library::shelf::previousPageTop(top, count);
+  prefetchTops = {next != top ? next : -1, previous != top && previous != next ? previous : -1};
+  shelfShownAtMs = millis();
+#endif
+}
+
+void LibraryListActivity::loop() {
+  UiTabListActivity::loop();
+  prefetchNeighbourPage();
+}
+
+void LibraryListActivity::prefetchNeighbourPage() {
+#ifdef BOARD_HAS_PSRAM
+  // Leave the card to the page being shown (and its refresh) first.
+  constexpr unsigned long PREFETCH_DELAY_MS = 800;
+  const auto pendingTop = [this] {
+    return std::find_if(prefetchTops.begin(), prefetchTops.end(), [](const int t) { return t >= 0; });
+  };
+  if (pendingTop() == prefetchTops.end() || millis() - shelfShownAtMs < PREFETCH_DELAY_MS) return;
+
+  RenderLock lock(*this);
+  // A render may have moved the page while the lock was awaited: decide again.
+  const auto pending = pendingTop();
+  if (pending == prefetchTops.end() || millis() - shelfShownAtMs < PREFETCH_DELAY_MS) return;
+  const int top = *pending;
+  *pending = -1;
+  if (seriesFoldersVisible() || shelfThumbHeight <= 0) return;
+  // Off the stack: twelve books' strings would crowd the loop task.
+  auto books = makeUniqueNoThrow<std::array<ShelfBook, SHELF_PAGE_SIZE>>();
+  if (!books) return;
+  const int count = library::shelf::visibleCount(top, bookRowCount());
+  coverstore::CoverSet::Book covers[SHELF_PAGE_SIZE];
+  for (int slot = 0; slot < count; ++slot) {
+    auto& book = (*books)[static_cast<size_t>(slot)];
+    if (resolveBook(top + slot, book)) covers[slot] = coverstore::CoverSet::Book{&book.path, book.fileSize};
+  }
+  const bool reopen = index.isOpen();
+  index.close();
+  coverstore::CoverSet::warm(covers, static_cast<size_t>(count), shelfThumbHeight);
+  if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
+#endif
 }
 
 void LibraryListActivity::generateShelfCovers() {

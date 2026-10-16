@@ -28,6 +28,7 @@ class LibraryListActivity final : public UiTabListActivity {
 
   void onEnter() override;
   void onExit() override;
+  void loop() override;
 
  protected:
   // --- UiListActivity / UiTabListActivity contract ---------------------------
@@ -145,6 +146,10 @@ class LibraryListActivity final : public UiTabListActivity {
   // left for generateShelfCovers(), which runs after the frame is shown.
   void prepareShelf(int top, int thumbHeight);
   void generateShelfCovers();
+  // Boards with PSRAM: once a page has been on screen a moment, the covers of
+  // the next and previous pages are read into the session cache, so turning
+  // the page draws them without touching the card.
+  void prefetchNeighbourPage();
   bool paintShelfCover(freeink::ui::Rect rect, uint16_t entry);
   static freeink::ui::CoverGridItem shelfItemProvider(uint16_t index, void* user);
   static bool shelfCoverPainter(freeink::ui::DrawTarget& target, freeink::ui::Rect rect,
@@ -233,6 +238,9 @@ class LibraryListActivity final : public UiTabListActivity {
   freeink::ui::ListProps shelfNavigation{};
   // The page's covers, decoded once per page and drawn from memory.
   coverstore::CoverSet shelfCovers;
+  // Neighbour pages still to warm, next page first; -1 when done.
+  std::array<int, 2> prefetchTops{-1, -1};
+  unsigned long shelfShownAtMs = 0;
 
   // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the
   // book is not in the index), and the current-direction rows to skip, sorted

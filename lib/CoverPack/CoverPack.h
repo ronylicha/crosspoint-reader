@@ -4,8 +4,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
-#include <vector>
 
 // One file of decoded cover thumbnails per thumbnail height, so a shelf page
 // reads its covers from a single open file instead of walking one cache folder
@@ -26,7 +26,10 @@
 // the record header against the key, so a damaged or out-of-date index only
 // costs a miss, and the cover is generated again.
 //
-// The card allows one open file at a time: no call keeps both files open.
+// The card allows one open reader at a time: lookups and reads open one file
+// at a time, and compaction reads the old pack while writing its replacement.
+// Index entries live in fallible allocations: a full or unallocatable index
+// makes add() and compact() fail cleanly, never abort.
 namespace coverpack {
 
 struct Key {
@@ -77,9 +80,17 @@ class CoverPack {
     uint32_t fileSize;
     uint32_t offset;
   };
-  bool loadIndex(std::vector<Entry>& entries) const;
-  bool writeIndex(const std::vector<Entry>& entries) const;
-  bool appendRecord(const Key& key, CoverSize size, const uint8_t* rows, uint32_t& offset) const;
+  struct EntryList {
+    std::unique_ptr<Entry[]> items;
+    uint32_t count = 0;
+  };
+  // Reads the index with room for `spare` more entries. A missing or damaged
+  // index reads as empty; false only when the file or memory is unavailable.
+  bool loadIndex(EntryList& list, uint32_t spare) const;
+  bool writeIndex(const Entry* entries, uint32_t count) const;
+  // `fresh` is set when the pack had to be started over: the index then
+  // describes nothing in it.
+  bool appendRecord(const Key& key, CoverSize size, const uint8_t* rows, uint32_t& offset, bool& fresh) const;
 
   std::string directory;
   std::string packFile;

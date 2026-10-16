@@ -4,6 +4,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <LibraryBuilder.h>
 #include <LibraryFormat.h>
@@ -19,6 +20,8 @@
 #include <mutex>
 #include <vector>
 
+#include "RecentBooksStore.h"
+
 namespace coverstore {
 namespace {
 
@@ -31,11 +34,21 @@ bool keyLess(const coverpack::Key& a, const coverpack::Key& b) {
   return a.pathHash != b.pathHash ? a.pathHash < b.pathHash : a.fileSize < b.fileSize;
 }
 
+// Internal RAM is shared with the whole firmware: on boards without PSRAM a
+// cover keeps its placeholder rather than pushing the heap below this floor.
+constexpr size_t INTERNAL_HEAP_FLOOR = 48 * 1024;
+
 Rows allocateRows(const size_t bytes) {
-#if BOARD_HAS_PSRAM
+#ifdef BOARD_HAS_PSRAM
   if (auto* rows = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM))) return Rows(rows);
 #endif
-  return Rows(static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT)));
+  const auto heap = HalMemory::getInternalHeap();
+  if (heap.freeBytes < bytes + INTERNAL_HEAP_FLOOR || heap.largestBlockBytes < bytes) {
+    LOG_DBG("COVER", "Skipping %u-byte cover: %u bytes free", static_cast<unsigned>(bytes),
+            static_cast<unsigned>(heap.freeBytes));
+    return Rows();
+  }
+  return Rows(static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 }
 
 std::string thumbPathFor(const std::string& bookPath, const int height) {
@@ -56,7 +69,7 @@ uint32_t statSize(const std::string& path) {
   return static_cast<uint32_t>(file.fileSize());
 }
 
-#if BOARD_HAS_PSRAM
+#ifdef BOARD_HAS_PSRAM
 // Recently shown covers, any height, least recently used evicted first.
 class SessionCache {
  public:
@@ -120,7 +133,7 @@ SessionCache& session() {
 #endif
 
 bool sessionCopy(const coverpack::Key& key, const int height, coverpack::CoverSize& size, Rows& out) {
-#if BOARD_HAS_PSRAM
+#ifdef BOARD_HAS_PSRAM
   return session().copyOut(key, height, size, out);
 #else
   (void)key;
@@ -132,7 +145,7 @@ bool sessionCopy(const coverpack::Key& key, const int height, coverpack::CoverSi
 }
 
 void sessionPut(const coverpack::Key& key, const int height, const coverpack::CoverSize size, const uint8_t* rows) {
-#if BOARD_HAS_PSRAM
+#ifdef BOARD_HAS_PSRAM
   session().put(key, height, size, rows);
 #else
   (void)key;
@@ -156,16 +169,14 @@ void CoverSet::clear() {
   slotCount = 0;
 }
 
-bool CoverSet::load(const Book* books, const size_t count, const int thumbHeight, bool* missing) {
+size_t CoverSet::loadFromMemoryAndPack(const Book* books, const size_t count, const int thumbHeight, size_t* unfilled) {
   clear();
   height = thumbHeight;
   slotCount = std::min(count, MAX_COVERS);
 
   coverpack::Key keys[MAX_COVERS];
-  size_t pending[MAX_COVERS];
   size_t pendingCount = 0;
   for (size_t i = 0; i < slotCount; ++i) {
-    missing[i] = false;
     Slot& slot = slots[i];
     const std::string* path = books[i].path;
     if (!path || path->empty()) continue;
@@ -175,41 +186,63 @@ bool CoverSet::load(const Book* books, const size_t count, const int thumbHeight
     slot.key = coverpack::Key{library::clixPathHash(path->data(), path->size()), fileSize};
     if (sessionCopy(slot.key, height, slot.size, slot.rows)) continue;
     keys[pendingCount] = slot.key;
-    pending[pendingCount++] = i;
+    unfilled[pendingCount++] = i;
   }
+  if (pendingCount == 0) return 0;
 
-  if (pendingCount > 0) {
-    const coverpack::CoverPack pack(PACK_DIR, height);
-    uint32_t offsets[MAX_COVERS];
-    pack.lookup(keys, pendingCount, offsets);
-    const size_t capacity = scratchCapacity(height);
-    Rows scratch = allocateRows(capacity);
-    HalFile file;
-    if (scratch && pack.openForRead(file)) {
-      for (size_t p = 0; p < pendingCount; ++p) {
-        Slot& slot = slots[pending[p]];
-        coverpack::CoverSize size;
-        if (!coverpack::CoverPack::readCover(file, offsets[p], slot.key, size, scratch.get(), capacity)) continue;
-        slot.rows = allocateRows(coverpack::coverBytes(size));
-        if (!slot.rows) continue;
-        memcpy(slot.rows.get(), scratch.get(), coverpack::coverBytes(size));
-        slot.size = size;
-        sessionPut(slot.key, height, size, slot.rows.get());
-      }
+  // One pass: a batch lookup in the index, then one open pack read in order.
+  const coverpack::CoverPack pack(PACK_DIR, height);
+  uint32_t offsets[MAX_COVERS];
+  pack.lookup(keys, pendingCount, offsets);
+  const size_t capacity = scratchCapacity(height);
+  Rows scratch = allocateRows(capacity);
+  HalFile file;
+  if (scratch && pack.openForRead(file)) {
+    for (size_t p = 0; p < pendingCount; ++p) {
+      Slot& slot = slots[unfilled[p]];
+      coverpack::CoverSize size;
+      if (!coverpack::CoverPack::readCover(file, offsets[p], slot.key, size, scratch.get(), capacity)) continue;
+      slot.rows = allocateRows(coverpack::coverBytes(size));
+      if (!slot.rows) continue;
+      memcpy(slot.rows.get(), scratch.get(), coverpack::coverBytes(size));
+      slot.size = size;
+      sessionPut(slot.key, height, size, slot.rows.get());
     }
   }
-
-  bool complete = true;
+  size_t left = 0;
   for (size_t p = 0; p < pendingCount; ++p) {
-    Slot& slot = slots[pending[p]];
-    if (slot.rows) continue;
+    if (!slots[unfilled[p]].rows) unfilled[left++] = unfilled[p];
+  }
+  return left;
+}
+
+bool CoverSet::load(const Book* books, const size_t count, const int thumbHeight, bool* missing) {
+  for (size_t i = 0; i < std::min(count, MAX_COVERS); ++i) missing[i] = false;
+  size_t unfilled[MAX_COVERS];
+  const size_t left = loadFromMemoryAndPack(books, count, thumbHeight, unfilled);
+  bool complete = true;
+  for (size_t u = 0; u < left; ++u) {
     // Not in the pack yet: a thumbnail from before the pack moves in once.
-    if (loadFromBmp(slot) == BmpResult::Absent) {
-      missing[pending[p]] = true;
+    if (loadFromBmp(slots[unfilled[u]]) == BmpResult::Absent) {
+      missing[unfilled[u]] = true;
       complete = false;
     }
   }
   return complete;
+}
+
+void CoverSet::warm(const Book* books, const size_t count, const int thumbHeight) {
+#ifdef BOARD_HAS_PSRAM
+  // The set itself is dropped: what matters is what reached the session cache.
+  auto set = makeUniqueNoThrow<CoverSet>();
+  if (!set) return;
+  size_t unfilled[MAX_COVERS];
+  set->loadFromMemoryAndPack(books, count, thumbHeight, unfilled);
+#else
+  (void)books;
+  (void)count;
+  (void)thumbHeight;
+#endif
 }
 
 bool CoverSet::refresh(const size_t index) {
@@ -288,14 +321,17 @@ bool CoverSet::draw(const GfxRenderer& renderer, const size_t index, const Rect&
 }
 
 void compactPacks() {
-  // Keys of every indexed book, sorted for lookup. Fallible: a huge library on
-  // a board short of memory just keeps its packs until the next rebuild.
+  // Keys of every indexed book plus the recent books (Home shows them even when
+  // the index skipped them), sorted for lookup. Fallible: a huge library on a
+  // board short of memory just keeps its packs until the next rebuild.
   size_t liveCount = 0;
+  size_t liveCapacity = 0;
   std::unique_ptr<coverpack::Key[]> live;
   {
     library::LibraryIndexFile index;
     if (!index.open(library::libraryIndexPath())) return;
-    live = makeUniqueNoThrow<coverpack::Key[]>(std::max<size_t>(index.bookCount(), 1));
+    liveCapacity = index.bookCount() + static_cast<size_t>(RecentBooksStore::MAX_RECENT_BOOKS);
+    live = makeUniqueNoThrow<coverpack::Key[]>(liveCapacity);
     if (!live) {
       LOG_ERR("COVER", "OOM: pack compaction skipped");
       return;
@@ -306,6 +342,12 @@ void compactPacks() {
       if (!index.readRecord(ordinal, record) || !index.readPathHash(record, hash)) return;  // keep packs on doubt
       live[liveCount++] = coverpack::Key{hash, record.fileSize};
     }
+  }
+  for (const auto& recent : RECENT_BOOKS.getBooks()) {
+    if (liveCount >= liveCapacity) break;
+    const uint32_t fileSize = statSize(recent.path);
+    if (fileSize != 0)
+      live[liveCount++] = coverpack::Key{library::clixPathHash(recent.path.data(), recent.path.size()), fileSize};
   }
   std::sort(live.get(), live.get() + liveCount, keyLess);
 

@@ -143,6 +143,19 @@ TEST(LibraryShelfPagination, ClampsOffsetOnIncompleteLastPage) {
   EXPECT_EQ(previousPage(11, 4096), 4095);
 }
 
+TEST(LibraryShelfPagination, NeighbourPageTopsWrapAroundTheLibrary) {
+  EXPECT_EQ(nextPageTop(0, 25), 12);
+  EXPECT_EQ(nextPageTop(12, 25), 24);
+  EXPECT_EQ(nextPageTop(24, 25), 0);
+  EXPECT_EQ(previousPageTop(0, 25), 24);
+  EXPECT_EQ(previousPageTop(24, 25), 12);
+  // A single page is its own neighbour.
+  EXPECT_EQ(nextPageTop(0, 12), 0);
+  EXPECT_EQ(previousPageTop(0, 12), 0);
+  EXPECT_EQ(nextPageTop(0, 0), 0);
+  EXPECT_EQ(previousPageTop(0, 0), 0);
+}
+
 TEST(LibraryShelfPagination, NormalizesOutOfRangeSelectionBeforeNavigation) {
   EXPECT_EQ(pageStart(-1, 25), 0);
   EXPECT_EQ(pageStart(999, 25), 24);

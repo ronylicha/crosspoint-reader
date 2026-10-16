@@ -41,6 +41,11 @@ class CoverSet {
   // thumbnail still has to be generated. Returns true when nothing is missing.
   bool load(const Book* books, size_t count, int thumbHeight, bool* missing);
 
+  // Boards with PSRAM: reads these covers from the pack into the session
+  // cache, so a later load() of them reads nothing from the card. Nothing is
+  // decoded from BMP or generated. No-op without PSRAM.
+  static void warm(const Book* books, size_t count, int thumbHeight);
+
   // Slot `index` after its thumbnail was generated: migrate and keep it.
   bool refresh(size_t index);
 
@@ -64,6 +69,8 @@ class CoverSet {
   };
   enum class BmpResult { Loaded, Absent, Unusable };
   BmpResult loadFromBmp(Slot& slot);
+  // Session cache, then the pack; returns the slots it could not fill.
+  size_t loadFromMemoryAndPack(const Book* books, size_t count, int thumbHeight, size_t* unfilled);
 
   std::array<Slot, MAX_COVERS> slots;
   size_t slotCount = 0;

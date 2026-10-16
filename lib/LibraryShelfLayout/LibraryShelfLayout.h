@@ -21,12 +21,22 @@ constexpr int visibleCount(const int top, const int count) {
   return remaining < PAGE_SIZE ? remaining : PAGE_SIZE;
 }
 
+// First entry of the page after / before the one starting at `top`; pages
+// wrap around the library.
+constexpr int nextPageTop(const int top, const int count) {
+  return count <= 0 || count - top <= PAGE_SIZE ? 0 : top + PAGE_SIZE;
+}
+
+constexpr int previousPageTop(const int top, const int count) {
+  if (count <= 0) return 0;
+  return top == 0 ? pageStart(count - 1, count) : top - PAGE_SIZE;
+}
+
 // Page navigation wraps and preserves the offset, clamping on incomplete pages.
 constexpr int nextPage(const int selected, const int count) {
   if (count <= 0) return 0;
   const int bounded = boundedSelection(selected, count);
-  const int top = pageStart(bounded, count);
-  const int nextTop = count - top <= PAGE_SIZE ? 0 : top + PAGE_SIZE;
+  const int nextTop = nextPageTop(pageStart(bounded, count), count);
   const int offset = bounded % PAGE_SIZE;
   return count - nextTop <= offset ? count - 1 : nextTop + offset;
 }
@@ -34,8 +44,7 @@ constexpr int nextPage(const int selected, const int count) {
 constexpr int previousPage(const int selected, const int count) {
   if (count <= 0) return 0;
   const int bounded = boundedSelection(selected, count);
-  const int top = pageStart(bounded, count);
-  const int previousTop = top == 0 ? pageStart(count - 1, count) : top - PAGE_SIZE;
+  const int previousTop = previousPageTop(pageStart(bounded, count), count);
   const int offset = bounded % PAGE_SIZE;
   return count - previousTop <= offset ? count - 1 : previousTop + offset;
 }

@@ -142,3 +142,39 @@ TEST_F(CoverPackTest, RejectsOversizedCovers) {
   EXPECT_FALSE(pack.add(Key{10, 100}, CoverSize{1024, 1024}, rows.data()));
   EXPECT_FALSE(pack.add(Key{10, 100}, CoverSize{0, 10}, rows.data()));
 }
+
+namespace {
+// Rewrites the index as `count` sorted entries, all pointing at `offset`.
+void forgeIndex(const CoverPack& pack, const uint32_t count, const uint32_t offset) {
+  std::vector<uint8_t> bytes = {'C', 'P', 'I', '1', 1, 0, 0, 0};
+  for (int i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(count >> (8 * i)));
+  for (uint32_t e = 0; e < count; ++e) {
+    const uint64_t hash = 1000 + e;
+    for (int i = 0; i < 8; ++i) bytes.push_back(static_cast<uint8_t>(hash >> (8 * i)));
+    for (int i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(100u >> (8 * i)));
+    for (int i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>(offset >> (8 * i)));
+  }
+  fake::files[pack.indexPath()] = std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+}
+}  // namespace
+
+TEST_F(CoverPackTest, AFullIndexRefusesNewCoversWithoutGrowingThePack) {
+  CoverPack pack("/covers", 153);
+  ASSERT_TRUE(pack.add(Key{10, 100}, SIZE, rowsFilledWith(0x55).data()));
+  forgeIndex(pack, 8192, 8);
+  const size_t before = fake::files[pack.packPath()]->size();
+  EXPECT_FALSE(pack.add(Key{1, 100}, SIZE, rowsFilledWith(0x0F).data()));
+  EXPECT_EQ(fake::files[pack.packPath()]->size(), before);
+}
+
+TEST_F(CoverPackTest, AnUnallocatableIndexFailsWithoutWriting) {
+  CoverPack pack("/covers", 153);
+  ASSERT_TRUE(pack.add(Key{10, 100}, SIZE, rowsFilledWith(0x55).data()));
+  const size_t before = fake::files[pack.packPath()]->size();
+  fake::failAlloc = true;
+  EXPECT_FALSE(pack.add(Key{20, 100}, SIZE, rowsFilledWith(0x0F).data()));
+  EXPECT_FALSE(pack.compact([](const Key&, void*) { return false; }, nullptr));
+  fake::failAlloc = false;
+  EXPECT_EQ(fake::files[pack.packPath()]->size(), before);
+  EXPECT_EQ(read(pack, Key{10, 100}), rowsFilledWith(0x55));
+}

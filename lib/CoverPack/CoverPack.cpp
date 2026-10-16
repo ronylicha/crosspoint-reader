@@ -130,10 +130,11 @@ bool CoverPack::readCover(HalFile& pack, const uint32_t offset, const Key& key, 
   return readExact(pack, rows, coverBytes(size));
 }
 
-bool CoverPack::appendRecord(const Key& key, const CoverSize size, const uint8_t* rows, uint32_t& offset) const {
+bool CoverPack::appendRecord(const Key& key, const CoverSize size, const uint8_t* rows, uint32_t& offset,
+                             bool& fresh) const {
   Storage.mkdir(directory.c_str());
   size_t packSize = 0;
-  bool fresh = true;
+  fresh = true;
   {
     HalFile pack;
     if (openForRead(pack)) {
@@ -165,31 +166,38 @@ bool CoverPack::appendRecord(const Key& key, const CoverSize size, const uint8_t
   return pack.close();
 }
 
-bool CoverPack::loadIndex(std::vector<Entry>& entries) const {
-  entries.clear();
-  if (!Storage.exists(indexFile.c_str())) return true;
+bool CoverPack::loadIndex(EntryList& list, const uint32_t spare) const {
+  list = EntryList{};
+  uint32_t count = 0;
   HalFile index;
-  if (!Storage.openFileForRead("COVER", indexFile, index)) return false;
-  uint8_t header[INDEX_HEADER];
-  if (!readExact(index, header, sizeof(header)) || memcmp(header, INDEX_MAGIC, sizeof(INDEX_MAGIC)) != 0 ||
-      getU16(header + 4) != FORMAT_VERSION) {
-    return true;  // unreadable index: rebuilt from what is added next
+  if (Storage.exists(indexFile.c_str())) {
+    if (!Storage.openFileForRead("COVER", indexFile, index)) return false;
+    uint8_t header[INDEX_HEADER];
+    if (readExact(index, header, sizeof(header)) && memcmp(header, INDEX_MAGIC, sizeof(INDEX_MAGIC)) == 0 &&
+        getU16(header + 4) == FORMAT_VERSION && getU32(header + 8) <= MAX_ENTRIES) {
+      count = getU32(header + 8);
+    }
   }
-  const uint32_t count = getU32(header + 8);
-  if (count > MAX_ENTRIES) return true;
-  entries.reserve(count);
+  if (count + spare > 0) {
+    list.items = makeUniqueNoThrow<Entry[]>(count + spare);
+    if (!list.items) {
+      LOG_ERR("COVER", "OOM: %u index entries", static_cast<unsigned>(count + spare));
+      return false;
+    }
+  }
   uint8_t raw[INDEX_ENTRY];
   for (uint32_t i = 0; i < count; ++i) {
     if (!readExact(index, raw, sizeof(raw))) {
-      entries.clear();
+      list.count = 0;  // damaged: rebuilt from what is added next
       return true;
     }
-    entries.push_back(Entry{getU64(raw), getU32(raw + 8), getU32(raw + 12)});
+    list.items[i] = Entry{getU64(raw), getU32(raw + 8), getU32(raw + 12)};
   }
+  list.count = count;
   return true;
 }
 
-bool CoverPack::writeIndex(const std::vector<Entry>& entries) const {
+bool CoverPack::writeIndex(const Entry* entries, const uint32_t count) const {
   const std::string tmp = indexFile + ".tmp";
   {
     HalFile index;
@@ -198,13 +206,13 @@ bool CoverPack::writeIndex(const std::vector<Entry>& entries) const {
     memcpy(header, INDEX_MAGIC, sizeof(INDEX_MAGIC));
     putU16(header + 4, FORMAT_VERSION);
     putU16(header + 6, 0);
-    putU32(header + 8, static_cast<uint32_t>(entries.size()));
+    putU32(header + 8, count);
     if (!writeExact(index, header, sizeof(header))) return false;
     uint8_t raw[INDEX_ENTRY];
-    for (const auto& entry : entries) {
-      putU64(raw, entry.pathHash);
-      putU32(raw + 8, entry.fileSize);
-      putU32(raw + 12, entry.offset);
+    for (uint32_t i = 0; i < count; ++i) {
+      putU64(raw, entries[i].pathHash);
+      putU32(raw + 8, entries[i].fileSize);
+      putU32(raw + 12, entries[i].offset);
       if (!writeExact(index, raw, sizeof(raw))) return false;
     }
     if (!index.close()) return false;
@@ -214,23 +222,35 @@ bool CoverPack::writeIndex(const std::vector<Entry>& entries) const {
 
 bool CoverPack::add(const Key& key, const CoverSize size, const uint8_t* rows) {
   if (!validSize(size) || rows == nullptr) return false;
+  EntryList list;
+  if (!loadIndex(list, 1)) return false;
+  Entry* const begin = list.items.get();
+  Entry* at = std::lower_bound(begin, begin + list.count, key, [](const Entry& entry, const Key& k) {
+    return keyLess(entry.pathHash, entry.fileSize, k.pathHash, k.fileSize);
+  });
+  bool replace = at != begin + list.count && at->pathHash == key.pathHash && at->fileSize == key.fileSize;
+  // Checked before writing: a full index must not grow the pack on every visit.
+  if (!replace && list.count >= MAX_ENTRIES) return false;  // compaction will make room
+
   uint32_t offset = 0;
-  if (!appendRecord(key, size, rows, offset)) {
+  bool fresh = false;
+  if (!appendRecord(key, size, rows, offset, fresh)) {
     LOG_ERR("COVER", "Cannot append to %s", packFile.c_str());
     return false;
   }
-  std::vector<Entry> entries;
-  if (!loadIndex(entries)) return false;
-  const auto at = std::lower_bound(entries.begin(), entries.end(), key, [](const Entry& entry, const Key& k) {
-    return keyLess(entry.pathHash, entry.fileSize, k.pathHash, k.fileSize);
-  });
-  if (at != entries.end() && at->pathHash == key.pathHash && at->fileSize == key.fileSize) {
+  if (fresh) {
+    list.count = 0;
+    at = begin;
+    replace = false;
+  }
+  if (replace) {
     at->offset = offset;
   } else {
-    if (entries.size() >= MAX_ENTRIES) return false;  // compaction will make room
-    entries.insert(at, Entry{key.pathHash, key.fileSize, offset});
+    memmove(at + 1, at, static_cast<size_t>(begin + list.count - at) * sizeof(Entry));
+    *at = Entry{key.pathHash, key.fileSize, offset};
+    ++list.count;
   }
-  if (!writeIndex(entries)) {
+  if (!writeIndex(begin, list.count)) {
     LOG_ERR("COVER", "Cannot write %s", indexFile.c_str());
     return false;
   }
@@ -238,15 +258,15 @@ bool CoverPack::add(const Key& key, const CoverSize size, const uint8_t* rows) {
 }
 
 bool CoverPack::compact(bool (*keep)(const Key& key, void* context), void* context) {
-  std::vector<Entry> entries;
-  if (!loadIndex(entries)) return false;
-  std::vector<Entry> kept;
-  kept.reserve(entries.size());
-  for (const auto& entry : entries) {
-    if (keep(Key{entry.pathHash, entry.fileSize}, context)) kept.push_back(entry);
+  EntryList list;
+  if (!loadIndex(list, 0)) return false;
+  Entry* const entries = list.items.get();
+  uint32_t kept = 0;
+  for (uint32_t i = 0; i < list.count; ++i) {
+    if (keep(Key{entries[i].pathHash, entries[i].fileSize}, context)) entries[kept++] = entries[i];
   }
-  if (kept.size() == entries.size()) return true;
-  if (kept.empty()) {
+  if (kept == list.count) return true;
+  if (kept == 0) {
     Storage.remove(indexFile.c_str());
     Storage.remove(packFile.c_str());
     return true;
@@ -258,8 +278,7 @@ bool CoverPack::compact(bool (*keep)(const Key& key, void* context), void* conte
     return false;
   }
   const std::string tmp = packFile + ".tmp";
-  std::vector<Entry> rewritten;
-  rewritten.reserve(kept.size());
+  uint32_t rewritten = 0;
   {
     HalFile source;
     if (!openForRead(source)) return false;
@@ -269,11 +288,11 @@ bool CoverPack::compact(bool (*keep)(const Key& key, void* context), void* conte
     packHeader(header);
     if (!writeExact(target, header, sizeof(header))) return false;
     size_t written = PACK_HEADER;
-    for (const auto& entry : kept) {
-      const Key key{entry.pathHash, entry.fileSize};
+    for (uint32_t i = 0; i < kept; ++i) {
+      const Key key{entries[i].pathHash, entries[i].fileSize};
       CoverSize size;
       // A record that no longer reads back is dropped: it is generated again.
-      if (!readCover(source, entry.offset, key, size, buffer.get(), MAX_COVER_BYTES)) continue;
+      if (!readCover(source, entries[i].offset, key, size, buffer.get(), MAX_COVER_BYTES)) continue;
       uint8_t record[RECORD_HEADER];
       putU64(record, key.pathHash);
       putU32(record + 8, key.fileSize);
@@ -282,7 +301,8 @@ bool CoverPack::compact(bool (*keep)(const Key& key, void* context), void* conte
       if (!writeExact(target, record, sizeof(record)) || !writeExact(target, buffer.get(), coverBytes(size))) {
         return false;
       }
-      rewritten.push_back(Entry{entry.pathHash, entry.fileSize, static_cast<uint32_t>(written)});
+      // In place: slot `rewritten` never runs ahead of slot `i`.
+      entries[rewritten++] = Entry{key.pathHash, key.fileSize, static_cast<uint32_t>(written)};
       written += RECORD_HEADER + coverBytes(size);
     }
     if (!target.close()) return false;
@@ -290,7 +310,7 @@ bool CoverPack::compact(bool (*keep)(const Key& key, void* context), void* conte
   // Pack first: an index left behind points at records whose headers no
   // longer match, which reads as misses rather than wrong covers.
   if (!Storage.replaceFile(tmp.c_str(), packFile.c_str())) return false;
-  return writeIndex(rewritten);
+  return writeIndex(entries, rewritten);
 }
 
 }  // namespace coverpack
