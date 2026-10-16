@@ -52,6 +52,8 @@ constexpr int FOCUS_RADIUS = 10;
 constexpr int EMPTY_ICON_SIZE = 32;
 
 constexpr int SET_DATE_HEIGHT = 40;
+// Per-book caches (thumbnails among them) live under this folder.
+constexpr char BOOK_CACHE_DIR[] = "/.crosspoint";
 
 constexpr fui::ActionId ACTION_OPEN_BOOK = 1;
 constexpr fui::ActionId ACTION_OPEN_STATS = 2;
@@ -224,55 +226,74 @@ HomeActivity::Layout HomeActivity::computeLayout() const {
 
 int HomeActivity::bookSlots(const Layout& layout) const { return books.empty() ? 0 : 1 + layout.rowCount; }
 
-bool HomeActivity::ensureThumb(RecentBook& book, const int height, bool& showingLoading, Rect& popupRect) {
-  const auto notifyLoading = [&] {
-    if (showingLoading) return;
-    showingLoading = true;
-    popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-    GUI.fillPopupProgress(renderer, popupRect, 0);
-  };
+namespace {
+// Thumbnail of a book at `height`, derived from its path; empty for formats
+// without a cover.
+std::string thumbPathFor(const std::string& bookPath, const int height) {
+  if (FsHelpers::hasReflowableBookExtension(bookPath)) return Epub::thumbBmpPathFor(bookPath, BOOK_CACHE_DIR, height);
+  if (FsHelpers::hasXtcExtension(bookPath)) return Xtc::thumbBmpPathFor(bookPath, BOOK_CACHE_DIR, height);
+  return {};
+}
+}  // namespace
+
+bool HomeActivity::resolveCovers(const Layout& layout) {
+  bool missing = false;
+  const int total = std::min<int>(1 + layout.rowCount, static_cast<int>(books.size()));
+  for (int i = 0; i < total; ++i) {
+    const int height = i == 0 ? layout.heroCover.height : ROW_COVER_HEIGHT;
+    std::string path = thumbPathFor(books[i].path, height);
+    if (!path.empty() && !Storage.exists(path.c_str())) {
+      path.clear();
+      missing = true;
+    }
+    coverPaths[i] = std::move(path);
+  }
+  for (int i = total; i < static_cast<int>(coverPaths.size()); ++i) coverPaths[i].clear();
+  preparedHeroHeight = layout.heroCover.height;
+  if (coverCache) coverCache->invalidate();
+  return missing;
+}
+
+bool HomeActivity::generateThumb(const RecentBook& book, const int height) {
   // One parser at a time, off the stack: EPUB/XTC objects exceed its budget.
   if (FsHelpers::hasReflowableBookExtension(book.path)) {
-    auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
+    auto epub = makeUniqueNoThrow<Epub>(book.path, BOOK_CACHE_DIR);
     if (!epub) {
       LOG_ERR("HOME", "OOM: cover EPUB");
       return false;
     }
-    book.coverBmpPath = epub->getThumbBmpPath();
-    if (Storage.exists(epub->getThumbBmpPath(height).c_str())) return true;
-    notifyLoading();
     return epub->generateThumbBmpFromSource(height);
   }
   if (FsHelpers::hasXtcExtension(book.path)) {
-    auto xtc = makeUniqueNoThrow<Xtc>(book.path, "/.crosspoint");
+    auto xtc = makeUniqueNoThrow<Xtc>(book.path, BOOK_CACHE_DIR);
     if (!xtc) {
       LOG_ERR("HOME", "OOM: cover XTC");
       return false;
     }
-    book.coverBmpPath = xtc->getThumbBmpPath();
-    if (Storage.exists(xtc->getThumbBmpPath(height).c_str())) return true;
-    notifyLoading();
     return xtc->load() && xtc->generateThumbBmp(height);
   }
   return false;
 }
 
-void HomeActivity::prepareCovers(const Layout& layout) {
+void HomeActivity::generateMissingCovers(const Layout& layout) {
   // Thumbs are generated at the exact slot height: rescaling a dithered 1-bit
   // image aliases badly.
-  const int heroHeight = layout.heroCover.height;
-  const int rowHeight = ROW_COVER_HEIGHT;
-  bool showingLoading = false;
+  const int total = std::min<int>(1 + layout.rowCount, static_cast<int>(books.size()));
   Rect popupRect;
-  const int total = 1 + layout.rowCount;
-  for (int i = 0; i < total && i < static_cast<int>(books.size()); ++i) {
-    const int height = i == 0 ? heroHeight : rowHeight;
-    const bool ok = ensureThumb(books[i], height, showingLoading, popupRect);
-    coverPaths[i] = ok ? UITheme::getCoverThumbPath(books[i].coverBmpPath, height) : std::string();
-    if (showingLoading) GUI.fillPopupProgress(renderer, popupRect, (i + 1) * 100 / total);
+  bool popupShown = false;
+  for (int i = 0; i < total; ++i) {
+    const int height = i == 0 ? layout.heroCover.height : ROW_COVER_HEIGHT;
+    if (!coverPaths[i].empty()) continue;
+    const std::string path = thumbPathFor(books[i].path, height);
+    if (path.empty()) continue;
+    if (!popupShown) {
+      popupShown = true;
+      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+      GUI.fillPopupProgress(renderer, popupRect, 0);
+    }
+    if (generateThumb(books[i], height)) coverPaths[i] = path;
+    GUI.fillPopupProgress(renderer, popupRect, (i + 1) * 100 / total);
   }
-  preparedHeroHeight = heroHeight;
-  coversReady = true;
   if (coverCache) coverCache->invalidate();
 }
 
@@ -463,8 +484,13 @@ void HomeActivity::buildScreen(UiScreen& screen) {
 
 void HomeActivity::render(RenderLock&&) {
   const Layout layout = computeLayout();
-  if (firstRenderDone && !coversReady && !books.empty()) prepareCovers(layout);
-  if (coversReady && (preparedHeroHeight != layout.heroCover.height)) prepareCovers(layout);
+  // Existing thumbnails are drawn in this very frame; only missing ones wait
+  // for a second pass, after the first frame is up.
+  if (!books.empty() && preparedHeroHeight != layout.heroCover.height) coversMissing = resolveCovers(layout);
+  if (firstRenderDone && coversMissing) {
+    generateMissingCovers(layout);
+    coversMissing = false;
+  }
   if (coverCache) coverCache->prepare();
 
   renderer.clearScreen();
@@ -474,10 +500,10 @@ void HomeActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   if (!firstRenderDone) {
-    // The first frame goes up before any thumbnail is generated; the next
-    // pass prepares the covers and repaints.
+    // The first frame goes up before any thumbnail is generated; a second
+    // pass runs only when some still has to be.
     firstRenderDone = true;
-    if (!books.empty()) requestUpdate();
+    if (coversMissing) requestUpdate();
   }
 }
 

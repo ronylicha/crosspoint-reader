@@ -12,6 +12,12 @@
 
 namespace library {
 
+namespace {
+// Largest well-formed blob: hash, a 255-byte name, four 255-byte fields with
+// their length bytes, the index flag and the float.
+constexpr uint32_t MAX_SHELF_BLOB = sizeof(uint64_t) + 255 + 4 * 256 + 1 + sizeof(float);
+}  // namespace
+
 LibraryIndexFile::~LibraryIndexFile() { close(); }
 
 bool LibraryIndexFile::open(const char* path) { return openImpl(path, false, false); }
@@ -360,6 +366,53 @@ bool LibraryIndexFile::readSeriesIndex(const ClixRecord& record, std::optional<f
   if (!readAt(head.nameStart + cursor + 1, raw, sizeof(raw))) return false;
   memcpy(&value, raw, sizeof(value));
   out = value;
+  return true;
+}
+
+bool LibraryIndexFile::readShelfFields(const ClixRecord& record, ShelfFields& out) {
+  out = ShelfFields{};
+  if (!opened || record.nameLen == 0) return false;
+  if (head.formatVersion == CLIX_LEGACY_FORMAT_VERSION) {
+    // No strict blob bounds in v2: the field readers walk it safely.
+    if (!readName(record, out.name)) return false;
+    readAuthor(record, out.author);
+    readTitle(record, out.title);
+    return true;
+  }
+  uint32_t start = 0;
+  uint32_t end = 0;
+  if (!recordBlobBounds(record, start, end)) return false;
+  const uint32_t size = end - start;
+  if (sizeof(uint64_t) > size || record.nameLen > size - sizeof(uint64_t) || size > MAX_SHELF_BLOB) return false;
+
+  std::string blob(size, '\0');
+  if (!readAt(head.nameStart + start, blob.data(), size)) return false;
+  const auto* bytes = reinterpret_cast<const uint8_t*>(blob.data());
+  uint32_t at = sizeof(uint64_t);
+  out.name.assign(blob, at, record.nameLen);
+  at += record.nameLen;
+
+  // author, title, source author, then the v3 series extension.
+  std::string* const fields[] = {&out.author, &out.title, nullptr};
+  for (std::string* field : fields) {
+    if (at >= size) return false;
+    const uint8_t len = bytes[at++];
+    if (len > size - at) return false;
+    if (field) field->assign(blob, at, len);
+    at += len;
+  }
+  if (at >= size) return false;
+  const uint8_t seriesLen = bytes[at++];
+  if (seriesLen > size - at) return false;
+  at += seriesLen;
+  if (at >= size || bytes[at] > 1) return false;
+  const bool hasIndex = bytes[at++] == 1;
+  if (!hasIndex) return at == size;
+  if (sizeof(float) != size - at) return false;
+  float value = 0;
+  memcpy(&value, bytes + at, sizeof(value));
+  if (!std::isfinite(value)) return false;
+  if (seriesLen > 0) out.seriesIndex = value;
   return true;
 }
 

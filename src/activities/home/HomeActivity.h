@@ -75,8 +75,13 @@ class HomeActivity final : public Activity, private UiAppHost {
   // Series volume of the current book, from the library index (none when the
   // book is not indexed or has no volume).
   static std::optional<float> lookupVolume(const std::string& path);
-  void prepareCovers(const Layout& layout);
-  bool ensureThumb(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
+  // Points each visible slot at its thumbnail when it already exists (no
+  // parser, so the first frame shows those covers). Returns true when some
+  // thumbnail still has to be generated.
+  bool resolveCovers(const Layout& layout);
+  // Generates the missing thumbnails under a progress popup.
+  void generateMissingCovers(const Layout& layout);
+  bool generateThumb(const RecentBook& book, int height);
 
   // Hero and rows paint covers through the cache, hence non-const.
   void drawHero(const Layout& layout);
@@ -104,8 +109,8 @@ class HomeActivity final : public Activity, private UiAppHost {
   TodayFigures figures;
   std::optional<float> heroVolume;
   int selection = 0;
-  int preparedHeroHeight = 0;
-  bool coversReady = false;
+  int preparedHeroHeight = 0;  // hero thumb height the slots were resolved for
+  bool coversMissing = false;
   bool firstRenderDone = false;
   const AppTab focusTab;
   const bool cleanInitialRefresh;

@@ -494,3 +494,44 @@ TEST(LibraryIndexFile, LegacyV2IsOnlyAcceptedForReconciliation) {
   EXPECT_EQ(index.seriesGroupStart(0), 0xFFFF);
   EXPECT_EQ(index.ordinalForRow(library::SortOrder::SeriesAsc, 0), 0xFFFF);
 }
+
+TEST(LibraryIndexFile, ShelfFieldsMatchTheSingleFieldReaders) {
+  auto data = fixture(library::CLIX_FORMAT_VERSION,
+                      {seriesBlob(""), seriesBlob("Saga", 0.0f), seriesBlob("Saga", 3.5f), seriesBlob("", 2.0f)});
+  Storage.setFile("/library.clx", std::move(data.bytes));
+  library::LibraryIndexFile index;
+  ASSERT_TRUE(index.open("/library.clx"));
+  for (uint16_t row = 0; row < 4; ++row) {
+    library::ClixRecord record{};
+    ASSERT_TRUE(index.readRecord(row, record));
+    library::LibraryIndexFile::ShelfFields fields;
+    ASSERT_TRUE(index.readShelfFields(record, fields));
+    std::string expected;
+    ASSERT_TRUE(index.readName(record, expected));
+    EXPECT_EQ(fields.name, expected);
+    ASSERT_TRUE(index.readAuthor(record, expected));
+    EXPECT_EQ(fields.author, expected);
+    ASSERT_TRUE(index.readTitle(record, expected));
+    EXPECT_EQ(fields.title, expected);
+    std::optional<float> number;
+    ASSERT_TRUE(index.readSeriesIndex(record, number));
+    EXPECT_EQ(fields.seriesIndex, number) << row;
+  }
+}
+
+TEST(LibraryIndexFile, ShelfFieldsRejectWhatTheSeriesReaderRejects) {
+  auto badFlag = seriesBlob("Saga");
+  badFlag.back() = 2;
+  auto truncated = seriesBlob("Saga", 1.0f);
+  truncated.pop_back();
+  for (const auto& blob : {badFlag, truncated, seriesBlob("Saga", std::numeric_limits<float>::infinity())}) {
+    auto data = fixture(library::CLIX_FORMAT_VERSION, {blob});
+    Storage.setFile("/library.clx", std::move(data.bytes));
+    library::LibraryIndexFile index;
+    ASSERT_TRUE(index.open("/library.clx"));
+    library::ClixRecord record{};
+    ASSERT_TRUE(index.readRecord(0, record));
+    library::LibraryIndexFile::ShelfFields fields;
+    EXPECT_FALSE(index.readShelfFields(record, fields));
+  }
+}

@@ -20,7 +20,15 @@
 #include "Epub/parsers/TocNcxParser.h"
 
 Epub::Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
-  cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
+  cachePath = cachePathFor(this->filepath, cacheDir);
+}
+
+std::string Epub::cachePathFor(const std::string& bookPath, const std::string& cacheDir) {
+  return cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(bookPath));
+}
+
+std::string Epub::thumbBmpPathFor(const std::string& bookPath, const std::string& cacheDir, const int height) {
+  return cachePathFor(bookPath, cacheDir) + "/thumb_" + std::to_string(height) + ".bmp";
 }
 
 bool Epub::findContentOpfFile(std::string* contentOpfFile, ZipFile* sharedZip) const {

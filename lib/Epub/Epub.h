@@ -78,6 +78,10 @@ class Epub {
   bool generateCoverBmp(bool cropped = false, bool originalThresholds = false) const;
   std::string getThumbBmpPath() const;
   std::string getThumbBmpPath(int height) const;
+  // Cache folder and thumbnail path of a book without constructing an Epub:
+  // shelves look thumbnails up for a whole page at a time.
+  static std::string cachePathFor(const std::string& bookPath, const std::string& cacheDir);
+  static std::string thumbBmpPathFor(const std::string& bookPath, const std::string& cacheDir, int height);
   bool generateThumbBmp(int height) const;
   // Locate the cover without building spine, TOC, or reading caches.
   bool generateThumbBmpFromSource(int height);

@@ -55,6 +55,8 @@ constexpr unsigned long LOADING_REFRESH_MS = 700;
 // Sort strip labels: small type and tight pills keep "Récents ↑" whole in a
 // quarter of a 480 px screen.
 constexpr int16_t TAB_PILL_PAD = 6;
+// Per-book caches (thumbnails among them) live under this folder.
+constexpr char BOOK_CACHE_DIR[] = "/.crosspoint";
 
 constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
@@ -1208,10 +1210,13 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
   if (ordinal != 0xFFFF && index.readRecord(ordinal, record)) {
     book.fileSize = record.fileSize;
     if (book.path.empty() && !index.readPath(record, book.path)) return false;
-    if (book.title.empty() && (!index.readTitle(record, book.title) || book.title.empty()))
-      index.readName(record, book.title);
-    if (book.author.empty()) index.readAuthor(record, book.author);
-    if (!index.readSeriesIndex(record, book.volume)) book.volume.reset();
+    // One read of the book's blob for everything the cell shows.
+    library::LibraryIndexFile::ShelfFields fields;
+    if (index.readShelfFields(record, fields)) {
+      if (book.title.empty()) book.title = fields.title.empty() ? std::move(fields.name) : std::move(fields.title);
+      if (book.author.empty()) book.author = std::move(fields.author);
+      book.volume = fields.seriesIndex;
+    }
   }
   if (book.path.empty()) return false;
   if (book.title.empty()) book.title = tr(STR_LIBRARY_UNKNOWN_TITLE);
@@ -1239,15 +1244,20 @@ void LibraryListActivity::prepareShelf(const int top, const int thumbHeight) {
     bool& missing = shelfCoverMissing[static_cast<size_t>(slot)];
     missing = false;
     if (!resolveBook(top + slot, book)) continue;
-    if (!book.thumbPath.empty()) {
-      book.thumbPath = UITheme::getCoverThumbPath(book.thumbPath, thumbHeight);
-      if (Storage.exists(book.thumbPath.c_str())) continue;
+    // The thumbnail path follows from the book path: no parser needed to find
+    // an existing one, so a page of known covers draws in a single pass.
+    if (FsHelpers::hasReflowableBookExtension(book.path)) {
+      book.thumbPath = Epub::thumbBmpPathFor(book.path, BOOK_CACHE_DIR, thumbHeight);
+    } else if (FsHelpers::hasXtcExtension(book.path)) {
+      book.thumbPath = Xtc::thumbBmpPathFor(book.path, BOOK_CACHE_DIR, thumbHeight);
+    } else {
       book.thumbPath.clear();
+      continue;  // no cover to show or generate
     }
-    if (FsHelpers::hasReflowableBookExtension(book.path) || FsHelpers::hasXtcExtension(book.path)) {
-      missing = true;
-      shelfCoversPending = true;
-    }
+    if (Storage.exists(book.thumbPath.c_str())) continue;
+    book.thumbPath.clear();
+    missing = true;
+    shelfCoversPending = true;
   }
 }
 
@@ -1275,7 +1285,7 @@ void LibraryListActivity::generateShelfCovers() {
     shelfCoverMissing[static_cast<size_t>(slot)] = false;
     auto& book = shelfBooks[static_cast<size_t>(slot)];
     if (FsHelpers::hasReflowableBookExtension(book.path)) {
-      auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
+      auto epub = makeUniqueNoThrow<Epub>(book.path, BOOK_CACHE_DIR);
       if (!epub) {
         LOG_ERR("LIB", "OOM: EPUB cover");
       } else {
@@ -1286,7 +1296,7 @@ void LibraryListActivity::generateShelfCovers() {
         }
       }
     } else if (FsHelpers::hasXtcExtension(book.path)) {
-      auto xtc = makeUniqueNoThrow<Xtc>(book.path, "/.crosspoint");
+      auto xtc = makeUniqueNoThrow<Xtc>(book.path, BOOK_CACHE_DIR);
       if (!xtc) {
         LOG_ERR("LIB", "OOM: XTC cover");
       } else {

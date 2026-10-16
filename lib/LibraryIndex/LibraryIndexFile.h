@@ -104,6 +104,17 @@ class LibraryIndexFile {
   // Absolute path of the book, rebuilt from its folder record.
   bool readPath(const ClixRecord& record, std::string& out);
 
+  // What a shelf cell shows, from one read of the book's name blob instead of
+  // one bounds search and several small reads per field. Empty strings and no
+  // volume are valid values; false means the blob is unreadable.
+  struct ShelfFields {
+    std::string name;
+    std::string author;
+    std::string title;
+    std::optional<float> seriesIndex;
+  };
+  bool readShelfFields(const ClixRecord& record, ShelfFields& out);
+
  private:
   bool openImpl(const char* path, bool acceptStaleFold, bool acceptLegacy);
   bool readAt(uint32_t offset, void* dst, size_t len);
