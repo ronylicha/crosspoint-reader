@@ -1,6 +1,6 @@
 # Bibliothèque : couvertures sur étagères
 
-La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.9](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.9), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.10](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.10), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
 
 ## Accès
 
@@ -69,13 +69,13 @@ Pour vérifier la différence entre retirer et supprimer, choisissez **Retirer d
 
 ## Couvertures et carte SD
 
-Les vignettes de couverture sont conservées sur la carte SD. Une page dont les couvertures ne sont pas encore en cache s'affiche d'abord avec des vignettes de remplacement ; une fenêtre **Préparation des couvertures** avec barre de progression les génère ensuite, puis la page est redessinée. La construction de l'index affiche de même **Lecture de vos livres…** avec une barre de progression : sur un premier index, les livres sont d'abord comptés pour que la barre avance régulièrement. Un livre sans couverture exploitable garde une vignette de remplacement et reste accessible.
+Les vignettes de couverture sont conservées sur la carte SD, et leur image décodée est rangée dans un fichier par taille de vignette (`/.crosspoint/covers/`). Une page dont les couvertures sont déjà prêtes s'affiche en une seule fois, couvertures comprises. Déplacer la sélection ne relit plus la carte : les couvertures de la page restent en mémoire. Sur X4 Pro, les couvertures déjà vues restent aussi en mémoire pendant toute la session, et celles des pages voisines sont préchargées dès que la page affichée est au repos : tourner la page ou revenir à l'accueil n'attend pas la carte. Seule une page dont des couvertures manquent encore affiche d'abord des vignettes de remplacement ; une fenêtre **Préparation des couvertures** avec barre de progression les génère ensuite, puis la page est redessinée. La construction de l'index affiche de même **Lecture de vos livres…** avec une barre de progression : sur un premier index, les livres sont d'abord comptés pour que la barre avance régulièrement. Un livre sans couverture exploitable garde une vignette de remplacement et reste accessible.
 
 Après avoir ajouté, renommé ou déplacé des livres sur la carte SD, utilisez **Réindexer la bibliothèque**. Le résultat de la recherche et l'ordre affiché sont recalculés après cette mise à jour.
 
 ## Vérification sur liseuse
 
-La suite complète passe avec **575 tests hôte**. Les compilations X4 Pro et X4/X3 réussissent sans avertissement. Aucun résultat matériel n'est acquis.
+La suite complète passe avec **590 tests hôte**. Les compilations X4 Pro et X4/X3 réussissent sans avertissement. Aucun résultat matériel n'est acquis.
 
 Les tailles et empreintes des deux binaires figurent dans le [README](../README.md#bibliothèque-sur-étagères). Pour l'installation, suivez les [instructions du README](../README.md#installation).
 

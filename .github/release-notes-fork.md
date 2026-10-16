@@ -17,6 +17,7 @@ Fork communautaire de CrossPoint Reader, basé sur la release officielle **${UPS
 - Onglets **Récents, Titre, Auteur et Séries**, chacun dans les deux sens de tri, et recherche par titre ou auteur.
 - **Séries** : dossiers virtuels avec leur nombre de livres, tomes classés par numéro ; les livres sans série sont réunis dans **Sans série**.
 - Fiche détaillée par appui long : titre, auteur, série, tome, fichier, chemin, format, taille ; ouverture, suppression confirmée, réindexation.
+- **Couvertures affichées en une fois** : leur image décodée est rangée sur la carte SD dans un fichier par taille de vignette ; une page dont les couvertures sont prêtes s'affiche en un seul rafraîchissement, et l'accueil aussi. Déplacer la sélection ne relit plus la carte. Sur X4 Pro, les couvertures vues restent en mémoire pendant la session, et celles des pages voisines sont préchargées.
 - **Chargement visible** : la construction de l'index et la préparation des couvertures affichent une barre de progression, au lieu d'un écran figé.
 - **Pastille de tome** (T1, T2…) sur les couvertures des livres d'une série, aussi sur le livre en cours de l'accueil.
 - Libellés des onglets de tri en petite police : « Récents » et « Auteur » ne sont plus tronqués.

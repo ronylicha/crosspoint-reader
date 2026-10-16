@@ -682,3 +682,47 @@ to the KOReader sync server.
   book closes because the upload runs later. `para` and `seriesIndex` are
   optional.
 - Deleting the file drops pending uploads; it never affects local progress.
+
+## Cover pack (`.crosspoint/covers/h<height>.pack` + `h<height>.idx`)
+
+Decoded cover thumbnails for the library shelves and Home, one pair of files
+per thumbnail height. Written by `lib/CoverPack/CoverPack`; read through
+`src/components/CoverStore`. All integers are little-endian.
+
+`.pack`, append-only:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | magic `CPK1` |
+| 4 | 2 | format version (1) |
+| 6 | 2 | reserved, 0 |
+| 8 | … | records |
+
+Each record: `pathHash` u64, `fileSize` u32, `width` u16, `height` u16, then
+`height` rows of `(width + 7) / 8` bytes, 1 bpp, most significant bit first,
+a set bit is ink, top row first.
+
+`.idx`, rewritten through a temporary file and an atomic replace:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | magic `CPI1` |
+| 4 | 2 | format version (1) |
+| 6 | 2 | reserved, 0 |
+| 8 | 4 | entry count (at most 8,192) |
+| 12 | 16 × count | `pathHash` u64, `fileSize` u32, record offset u32 |
+
+- Entries are sorted by (`pathHash`, `fileSize`) and searched by bisection on
+  the card. `pathHash` is `library::clixPathHash` of the book's full path, the
+  hash the library index stores; `fileSize` is the book's size in bytes. A book
+  replaced under the same name gets a new key and never shows the old cover.
+- Every read checks the record header against the key: a damaged or
+  out-of-date index costs a miss and the cover is decoded again, never a wrong
+  cover. A record larger than 32 KiB or wider or taller than 1,024 px is
+  rejected.
+- The BMP thumbnails (`epub_<hash>/thumb_<h>.bmp`, `xtc_<hash>/…`) stay where
+  they were: the sleep screen and the generators use them. A thumbnail found
+  without a pack entry is copied into the pack the first time it is shown.
+- A library rebuild that adds, renames or removes books drops the entries of
+  books no longer indexed and rewrites the pack without them.
+- Deleting `covers/` is safe: covers move back in from the BMP thumbnails.
