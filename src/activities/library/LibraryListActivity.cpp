@@ -23,6 +23,7 @@
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/CoverStore.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/VolumeBadge.h"
@@ -184,7 +185,6 @@ void LibraryListActivity::onEnter() {
 }
 
 void LibraryListActivity::onExit() {
-  shelfCoverFile.close();
   optionPopup.dismiss();
   index.close();
   Activity::onExit();
@@ -228,6 +228,8 @@ bool LibraryListActivity::rebuildIndex() {
           static_cast<unsigned>(stats.enriched), static_cast<unsigned>(stats.duplicatesDropped),
           static_cast<unsigned>(stats.unreadableSkipped));
   if (stats.dedupDegraded) LOG_ERR("LIB", "rebuild completed without duplicate detection");
+  // Books removed or replaced since the last rebuild leave covers behind.
+  if (stats.removed > 0 || stats.renamed > 0 || stats.added > 0) coverstore::compactPacks();
   return true;
 }
 
@@ -1189,7 +1191,6 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
   book.title.clear();
   book.author.clear();
   book.path.clear();
-  book.thumbPath.clear();
   book.fileSize = 0;
   book.volume.reset();
   if (seriesFoldersVisible() || entry < 0 || entry >= bookRowCount()) return false;
@@ -1200,7 +1201,6 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
     book.path = recent.path;
     book.title = recent.title;
     book.author = recent.author;
-    book.thumbPath = recent.coverBmpPath;
     const uint16_t ascRow = pinnedAscRows[entry];
     if (ascRow != 0xFFFF && index.isOpen()) ordinal = index.ordinalForRow(library::SortOrder::RecentAsc, ascRow);
   } else if (index.isOpen()) {
@@ -1224,10 +1224,8 @@ bool LibraryListActivity::resolveBook(const int entry, ShelfBook& book) {
     // The index can miss a newly opened file. Release its reader before stat.
     const bool reopen = index.isOpen();
     index.close();
-    if (Storage.openFileForRead("LIB", book.path.c_str(), shelfCoverFile)) {
-      book.fileSize = static_cast<uint32_t>(shelfCoverFile.fileSize());
-      shelfCoverFile.close();
-    }
+    HalFile file;
+    if (Storage.openFileForRead("LIB", book.path.c_str(), file)) book.fileSize = static_cast<uint32_t>(file.fileSize());
     if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
   }
   return true;
@@ -1240,25 +1238,21 @@ void LibraryListActivity::prepareShelf(const int top, const int thumbHeight) {
   shelfCount = library::shelf::visibleCount(top, bookRowCount());
   shelfCoversPending = false;
   for (int slot = 0; slot < shelfCount; ++slot) {
-    auto& book = shelfBooks[static_cast<size_t>(slot)];
-    bool& missing = shelfCoverMissing[static_cast<size_t>(slot)];
-    missing = false;
-    if (!resolveBook(top + slot, book)) continue;
-    // The thumbnail path follows from the book path: no parser needed to find
-    // an existing one, so a page of known covers draws in a single pass.
-    if (FsHelpers::hasReflowableBookExtension(book.path)) {
-      book.thumbPath = Epub::thumbBmpPathFor(book.path, BOOK_CACHE_DIR, thumbHeight);
-    } else if (FsHelpers::hasXtcExtension(book.path)) {
-      book.thumbPath = Xtc::thumbBmpPathFor(book.path, BOOK_CACHE_DIR, thumbHeight);
-    } else {
-      book.thumbPath.clear();
-      continue;  // no cover to show or generate
-    }
-    if (Storage.exists(book.thumbPath.c_str())) continue;
-    book.thumbPath.clear();
-    missing = true;
-    shelfCoversPending = true;
+    resolveBook(top + slot, shelfBooks[static_cast<size_t>(slot)]);
   }
+  // Covers come from memory or the cover pack; the index releases the card
+  // while they load.
+  coverstore::CoverSet::Book covers[SHELF_PAGE_SIZE];
+  for (int slot = 0; slot < shelfCount; ++slot) {
+    const auto& book = shelfBooks[static_cast<size_t>(slot)];
+    covers[slot] = coverstore::CoverSet::Book{&book.path, book.fileSize};
+  }
+  const bool reopen = index.isOpen();
+  index.close();
+  bool missing[SHELF_PAGE_SIZE] = {};
+  shelfCoversPending = !shelfCovers.load(covers, static_cast<size_t>(shelfCount), thumbHeight, missing);
+  for (int slot = 0; slot < shelfCount; ++slot) shelfCoverMissing[static_cast<size_t>(slot)] = missing[slot];
+  if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
 }
 
 void LibraryListActivity::generateShelfCovers() {
@@ -1288,25 +1282,21 @@ void LibraryListActivity::generateShelfCovers() {
       auto epub = makeUniqueNoThrow<Epub>(book.path, BOOK_CACHE_DIR);
       if (!epub) {
         LOG_ERR("LIB", "OOM: EPUB cover");
-      } else {
-        book.thumbPath = epub->getThumbBmpPath(thumbHeight);
-        if (!Storage.exists(book.thumbPath.c_str())) {
-          beginGeneration();
-          if (!epub->generateThumbBmpFromSource(thumbHeight)) book.thumbPath.clear();
-        }
+      } else if (!Storage.exists(epub->getThumbBmpPath(thumbHeight).c_str())) {
+        beginGeneration();
+        epub->generateThumbBmpFromSource(thumbHeight);
       }
     } else if (FsHelpers::hasXtcExtension(book.path)) {
       auto xtc = makeUniqueNoThrow<Xtc>(book.path, BOOK_CACHE_DIR);
       if (!xtc) {
         LOG_ERR("LIB", "OOM: XTC cover");
-      } else {
-        book.thumbPath = xtc->getThumbBmpPath(thumbHeight);
-        if (!Storage.exists(book.thumbPath.c_str())) {
-          beginGeneration();
-          if (!xtc->load() || !xtc->generateThumbBmp(thumbHeight)) book.thumbPath.clear();
-        }
+      } else if (!Storage.exists(xtc->getThumbBmpPath(thumbHeight).c_str())) {
+        beginGeneration();
+        if (xtc->load()) xtc->generateThumbBmp(thumbHeight);
       }
     }
+    // Into the pack and memory, drawable from the next frame on.
+    shelfCovers.refresh(static_cast<size_t>(slot));
     ++done;
     if (popupShown) updateLoadingPopup(done * 100 / total);
   }
@@ -1331,15 +1321,10 @@ bool LibraryListActivity::paintShelfCover(const fui::Rect rect, const uint16_t e
   const int slot = entry - shelfTop;
   if (slot < 0 || slot >= shelfCount) return false;
   const auto& book = shelfBooks[static_cast<size_t>(slot)];
-  bool drawn = false;
-  if (!book.thumbPath.empty() && Storage.openFileForRead("LIB", book.thumbPath.c_str(), shelfCoverFile)) {
-    if (shelfCoverBitmap.parseHeaders() == BmpReaderError::Ok && shelfCoverBitmap.getWidth() > 0 &&
-        shelfCoverBitmap.getHeight() > 0)
-      drawn = GUI.drawCoverThumbFill(renderer, shelfCoverBitmap, Rect{rect.x, rect.y, rect.width, rect.height}, 0);
-    shelfCoverFile.close();
-  }
-  if (!drawn) GUI.drawCoverPlaceholder(renderer, Rect{rect.x, rect.y, rect.width, rect.height});
-  volumebadge::draw(renderer, Rect{rect.x, rect.y, rect.width, rect.height}, book.volume, SMALL_FONT_ID);
+  const Rect cell{rect.x, rect.y, rect.width, rect.height};
+  // From memory: no card access while drawing, whatever moved.
+  if (!shelfCovers.draw(renderer, static_cast<size_t>(slot), cell)) GUI.drawCoverPlaceholder(renderer, cell);
+  volumebadge::draw(renderer, cell, book.volume, SMALL_FONT_ID);
   return true;
 }
 
@@ -1396,10 +1381,8 @@ void LibraryListActivity::buildShelves(UiScreen& screen) {
   shelfGrid.scrollIndicator = false;
   shelfGrid.coverPainter = &LibraryListActivity::shelfCoverPainter;
   shelfGrid.coverPainterUserData = this;
-  const bool reopen = index.isOpen();
-  index.close();
+  // Covers draw from memory: the index can stay open across the paint.
   fui::coverGrid(screen.frame(), body, shelfGrid);
-  if (reopen && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
   // Shelf rails are painted last: cell backgrounds would otherwise erase them.
   const fui::Paint rail = theme.listRow.normal.foreground;
   for (int row = 0; row < library::shelf::ROWS; ++row) {

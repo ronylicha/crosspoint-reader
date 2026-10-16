@@ -14,6 +14,7 @@
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
 #include "components/AppNavigation.h"
+#include "components/CoverStore.h"
 #include "components/OptionPopup.h"
 #include "components/media/cover-grid.h"
 
@@ -136,7 +137,6 @@ class LibraryListActivity final : public UiTabListActivity {
     std::string title;
     std::string author;
     std::string path;
-    std::string thumbPath;
     uint32_t fileSize = 0;
     std::optional<float> volume;  // series volume, shown as a badge on the cover
   };
@@ -231,8 +231,8 @@ class LibraryListActivity final : public UiTabListActivity {
   bool shelfCoversPending = false;
   freeink::ui::CoverGridProps shelfGrid{};
   freeink::ui::ListProps shelfNavigation{};
-  HalFile shelfCoverFile;
-  Bitmap shelfCoverBitmap{shelfCoverFile};
+  // The page's covers, decoded once per page and drawn from memory.
+  coverstore::CoverSet shelfCovers;
 
   // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the
   // book is not in the index), and the current-direction rows to skip, sorted

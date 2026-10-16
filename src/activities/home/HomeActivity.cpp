@@ -74,13 +74,6 @@ void HomeActivity::onEnter() {
   loadBooks();
   loadFigures();
 
-  coverCache = makeUniqueNoThrow<HomeCoverCache>(renderer);
-  if (!coverCache) {
-    LOG_ERR("HOME", "OOM: cover cache");
-  } else if (!books.empty()) {
-    coverCache->begin();
-  }
-
   // The selection is flat: books first, then the visible tabs by bar index.
   const Layout layout = computeLayout();
   const auto tabIndex = [](const AppTab tab) {
@@ -109,7 +102,8 @@ void HomeActivity::onEnter() {
 
 void HomeActivity::onExit() {
   Activity::onExit();
-  coverCache.reset();
+  heroCovers.clear();
+  rowCovers.clear();
 }
 
 void HomeActivity::loadBooks() {
@@ -237,21 +231,24 @@ std::string thumbPathFor(const std::string& bookPath, const int height) {
 }  // namespace
 
 bool HomeActivity::resolveCovers(const Layout& layout) {
-  bool missing = false;
-  const int total = std::min<int>(1 + layout.rowCount, static_cast<int>(books.size()));
-  for (int i = 0; i < total; ++i) {
-    const int height = i == 0 ? layout.heroCover.height : ROW_COVER_HEIGHT;
-    std::string path = thumbPathFor(books[i].path, height);
-    if (!path.empty() && !Storage.exists(path.c_str())) {
-      path.clear();
-      missing = true;
-    }
-    coverPaths[i] = std::move(path);
+  // The hero and the rows use two thumbnail heights, hence two sets.
+  const int rows = std::min<int>(layout.rowCount, std::max(0, static_cast<int>(books.size()) - 1));
+  coverstore::CoverSet::Book hero{&books[0].path, 0};
+  coverstore::CoverSet::Book recent[MAX_ROWS];
+  for (int i = 0; i < rows; ++i) recent[i] = coverstore::CoverSet::Book{&books[static_cast<size_t>(i) + 1].path, 0};
+  bool heroMissing = false;
+  bool rowMissing[MAX_ROWS] = {};
+  heroCovers.load(&hero, 1, layout.heroCover.height, &heroMissing);
+  rowCovers.load(recent, static_cast<size_t>(rows), ROW_COVER_HEIGHT, rowMissing);
+  slotNeedsThumb.fill(false);
+  slotNeedsThumb[0] = heroMissing;
+  bool anyMissing = heroMissing;
+  for (int i = 0; i < rows; ++i) {
+    slotNeedsThumb[static_cast<size_t>(i) + 1] = rowMissing[i];
+    anyMissing = anyMissing || rowMissing[i];
   }
-  for (int i = total; i < static_cast<int>(coverPaths.size()); ++i) coverPaths[i].clear();
   preparedHeroHeight = layout.heroCover.height;
-  if (coverCache) coverCache->invalidate();
-  return missing;
+  return anyMissing;
 }
 
 bool HomeActivity::generateThumb(const RecentBook& book, const int height) {
@@ -282,30 +279,41 @@ void HomeActivity::generateMissingCovers(const Layout& layout) {
   Rect popupRect;
   bool popupShown = false;
   for (int i = 0; i < total; ++i) {
-    const int height = i == 0 ? layout.heroCover.height : ROW_COVER_HEIGHT;
-    if (!coverPaths[i].empty()) continue;
-    const std::string path = thumbPathFor(books[i].path, height);
-    if (path.empty()) continue;
+    if (!slotNeedsThumb[static_cast<size_t>(i)]) continue;
+    slotNeedsThumb[static_cast<size_t>(i)] = false;
     if (!popupShown) {
       popupShown = true;
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       GUI.fillPopupProgress(renderer, popupRect, 0);
     }
-    if (generateThumb(books[i], height)) coverPaths[i] = path;
+    const int height = i == 0 ? layout.heroCover.height : ROW_COVER_HEIGHT;
+    if (generateThumb(books[static_cast<size_t>(i)], height)) {
+      if (i == 0)
+        heroCovers.refresh(0);
+      else
+        rowCovers.refresh(static_cast<size_t>(i) - 1);
+    }
     GUI.fillPopupProgress(renderer, popupRect, (i + 1) * 100 / total);
   }
-  if (coverCache) coverCache->invalidate();
 }
 
 void HomeActivity::drawCover(const Rect& rect, const size_t index) {
-  if (coverCache && index < coverPaths.size()) {
-    coverCache->paint(freeink::ui::Rect{static_cast<int16_t>(rect.x), static_cast<int16_t>(rect.y),
-                                        static_cast<int16_t>(rect.width), static_cast<int16_t>(rect.height)},
-                      index, coverPaths[index]);
+  const coverstore::CoverSet& set = index == 0 ? heroCovers : rowCovers;
+  const size_t slot = index == 0 ? 0 : index - 1;
+  // The art nudges a few px right of center; the spine below hugs its left
+  // edge either way.
+  constexpr int ART_SHIFT = 3;
+  if (!set.draw(renderer, slot, rect, ART_SHIFT)) {
+    GUI.drawCoverPlaceholder(renderer, rect);
+    renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
     return;
   }
-  GUI.drawCoverPlaceholder(renderer, rect);
   renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
+  // False spine glued to the art's left edge: a dark band with a dithered
+  // crease makes every cover read as a bound book.
+  const int artLeft = std::max(rect.x, rect.x + (rect.width - set.sizeOf(slot).width) / 2 + ART_SHIFT);
+  renderer.fillRect(artLeft, rect.y, 3, rect.height);
+  renderer.fillRectDither(artLeft + 3, rect.y, 2, rect.height, Color::LightGray);
 }
 
 void HomeActivity::drawHero(const Layout& layout) {
@@ -320,7 +328,7 @@ void HomeActivity::drawHero(const Layout& layout) {
                                      UITheme::TextVerticalAlignment::TOP);
   } else {
     drawCover(cover, 0);
-    // Over the cached cover, never baked into the cache's snapshot.
+    // Drawn over the cover every frame; the stored cover never includes it.
     volumebadge::draw(renderer, cover, heroVolume, UI_10_FONT_ID);
     const Rect& caption = layout.heroCaption;
     char percent[8];
@@ -491,7 +499,6 @@ void HomeActivity::render(RenderLock&&) {
     generateMissingCovers(layout);
     coversMissing = false;
   }
-  if (coverCache) coverCache->prepare();
 
   renderer.clearScreen();
   renderUi();

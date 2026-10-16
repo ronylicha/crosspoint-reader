@@ -10,7 +10,7 @@
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
 #include "components/AppNavigation.h"
-#include "components/HomeCoverCache.h"
+#include "components/CoverStore.h"
 #include "components/UiAppHost.h"
 #include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
@@ -100,12 +100,14 @@ class HomeActivity final : public Activity, private UiAppHost {
   void activate(int selection, const Layout& layout);
   void openBook(size_t index);
 
-  std::unique_ptr<HomeCoverCache> coverCache;
+  // Decoded covers of the hero and of the recent rows (two thumbnail heights).
+  coverstore::CoverSet heroCovers;
+  coverstore::CoverSet rowCovers;
   ButtonNavigator buttonNavigator;
   std::vector<RecentBook> books;
   std::array<int, MAX_BOOKS> progress{};
   std::array<bool, MAX_BOOKS> finished{};
-  std::array<std::string, MAX_BOOKS> coverPaths;
+  std::array<bool, MAX_BOOKS> slotNeedsThumb{};  // thumbnail to generate
   TodayFigures figures;
   std::optional<float> heroVolume;
   int selection = 0;
