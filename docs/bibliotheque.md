@@ -1,6 +1,6 @@
 # Bibliothèque : couvertures sur étagères
 
-La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.10](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.10), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
 
 ## Accès
 
@@ -40,6 +40,8 @@ Après avoir renseigné une série dans Calibre, transférez le fichier EPUB mis
 Sur une liseuse tactile, touchez une couverture pour ouvrir le livre. Avec les boutons, sélectionnez le livre puis appuyez brièvement sur **Confirmer**.
 
 Un appui court sur les boutons de navigation parcourt les livres. Maintenez un bouton de navigation pour changer de page de douze livres. Sur un appareil tactile, balayez vers le haut ou le bas pour changer de page.
+
+Avec les boutons, la barre **Bibliothèque | Fichiers** s'atteint depuis les onglets de tri : un appui bref sur le bouton de navigation précédent (Haut ou Gauche) y place un curseur inversé. Les boutons précédent et suivant le déplacent sur **Bibliothèque**, **Fichiers**, **Catalogues** ou **Plugins** s'ils sont affichés, puis **Recherche** ; **Confirmer** ouvre l'élément. **Retour**, ou le bouton suivant après le dernier élément, rend la main aux onglets. Dans **Fichiers**, le bouton précédent sur la première ligne mène à la même barre, avec le curseur sur **Fichiers**.
 
 Maintenez le doigt sur une couverture, ou maintenez **Confirmer pendant une seconde** sur le livre sélectionné, pour ouvrir sa fiche. L'appui long consulte les informations du livre ; la suppression se choisit ensuite dans le menu.
 

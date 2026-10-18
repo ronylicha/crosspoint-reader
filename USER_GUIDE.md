@@ -134,7 +134,7 @@ The Browse Files screen acts as a file and folder browser. Open it from the **Li
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. A book with a volume number carries a badge in its cover's top-right corner (**#3**, or **T3** in French). The shelves and the **Series** tab are part of [release v1.6.5-games.10](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.10), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. A book with a volume number carries a badge in its cover's top-right corner (**#3**, or **T3** in French). The shelves and the **Series** tab are part of [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
 
 Four tabs organise the books; their labels use the small font so that each one stays whole beside its sort arrow. The arrow beside the active tab shows the sort direction:
 
@@ -153,7 +153,8 @@ On a button-only device:
 
 - Use the navigation buttons to select the previous or next book. Hold a navigation button to move to another page of twelve covers.
 - Press **Confirm** to open the selected book.
-- Press **Back** to leave an open series folder; otherwise it clears an active search, then returns focus to the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to open Search. Holding a navigation button steps through the tabs.
+- Press **Back** to leave an open series folder; otherwise it clears an active search, then returns focus to the tabs. With the tabs focused, press **Confirm** to select the next tab, hold **Confirm** to reverse the active tab's sort direction, or briefly press the previous navigation button to move up to the **Library | Files** bar. Holding a navigation button steps through the tabs.
+- In the **Library | Files** bar, the previous and next navigation buttons move the inverted cursor across **Library**, **Files**, **Catalogs** or **Plugins** when shown, and **Search**; **Confirm** opens the item, and **Back** or next past the last item returns to the tabs. In **Files**, press the previous navigation button on the first entry to reach the same bar.
 - Hold **Confirm for one second** on a selected book to open its details.
 
 On a touch device, tap a cover to open its book. Swipe up or down to move to another page of twelve covers. Tap a tab to change the order, or tap the active tab again to reverse it. The **Search** and **Refresh** buttons sit at the right of the **Library | Files** bar. While a search or a series folder is open, a line under that bar shows it; tap it (or its back arrow) to step back. Long-press a cover to open its details.

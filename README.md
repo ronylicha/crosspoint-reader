@@ -2,7 +2,7 @@
 
 > Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) : **nouvelle interface à onglets**, **accueil épuré**, **statistiques de lecture**, **bibliothèque refondue** (étagères de couvertures, séries) et, sur le **Xteink X4 Pro** tactile, un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon**.
 
-**Version actuelle : 1.6.5-games.10** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.10](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.10).
+**Version actuelle : 1.6.5-games.11** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11).
 
 | Fichier | Liseuse |
 |---|---|
@@ -77,10 +77,10 @@ Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer m
 
 Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
 
-Validation de la version 1.6.5-games.10 : **590 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
+Validation de la version 1.6.5-games.11 : **590 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
 
-- `firmware-x4pro-jeux.bin` : **5 935 008 octets**, `dfe057a3f722959cdb8b782838b8e0cc4545847639e25db0eafc89024c706476`
-- `firmware-x4.bin` : **5 812 448 octets**, `e32e753fba286d5612a805c69ed2910fa7456152ebbc70718fe9ee1a97b0fd78`
+- `firmware-x4pro-jeux.bin` : **5 935 920 octets**, `2ecfaf45cf1646d75efc7bc56bede19ceed24e98eadb7274907422c29ad6a202`
+- `firmware-x4.bin` : **5 813 552 octets**, `a20dcabdf0eb8102aa80823dd3c787e1a1c9937baea7755d465579df82363bc8`
 
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 
