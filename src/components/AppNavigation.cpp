@@ -71,6 +71,19 @@ fui::StyleSet plainTabStyles() {
   return styles;
 }
 
+// The button cursor: an inverted shape behind the focused element.
+fui::StyleSet cursorStyles(const uint8_t radius) {
+  fui::StyleSet styles;
+  styles.explicitlySet = true;
+  styles.normal.background = fui::Paint::solid(fui::Color::Black);
+  styles.normal.foreground = fui::Paint::solid(fui::Color::White);
+  styles.normal.radius = radius;
+  styles.selected = styles.normal;
+  styles.focused = styles.normal;
+  styles.active = styles.normal;
+  return styles;
+}
+
 void onTabAction(const fui::ActionEvent& event, void* user) {
   const auto active = static_cast<AppTab>(reinterpret_cast<uintptr_t>(user));
   if (event.value < 0 || event.value >= TAB_COUNT || event.value == static_cast<int>(active)) return;
@@ -192,8 +205,10 @@ int buildSubBar(UiScreen& screen, const GfxRenderer& renderer, const int top, co
   const int height = subBarHeight();
   const int16_t inset = sideInset(renderer);
   const auto& theme = screen.theme();
+  const int count = std::min(spec.count, SubBarSpec::MAX_ITEMS);
 
-  // Trailing icon buttons, right-aligned.
+  // Trailing icon buttons, right-aligned. The button cursor inverts the
+  // focused one, as on the app tab bar.
   int16_t right = static_cast<int16_t>(width - inset);
   const int trailingCount = std::min(spec.trailingCount, SubBarSpec::MAX_TRAILING);
   for (int i = trailingCount - 1; i >= 0; --i) {
@@ -204,7 +219,7 @@ int buildSubBar(UiScreen& screen, const GfxRenderer& renderer, const int top, co
     button.action = ACTION_APP_SUBBAR;
     button.value = static_cast<int16_t>(spec.count + i);
     button.inputMask = fui::InputTouch;
-    button.styles = plainTabStyles();
+    button.styles = spec.focused == count + i ? cursorStyles(FOCUS_RADIUS) : plainTabStyles();
     button.minTouchSize = theme.minTouchSize;
     fui::button(screen.frame(),
                 fui::Rect{right, static_cast<int16_t>(top + (height - SUB_TRAILING_SIZE) / 2), SUB_TRAILING_SIZE,
@@ -212,42 +227,54 @@ int buildSubBar(UiScreen& screen, const GfxRenderer& renderer, const int top, co
                 button);
   }
 
-  // Text pills, content-width from the left.
-  fui::TabItem pills[SubBarSpec::MAX_ITEMS];
-  const int count = std::min(spec.count, SubBarSpec::MAX_ITEMS);
+  // Text pills, content-width from the left; equal slots when the labels do
+  // not fit. Each pill is its own one-tab bar so the cursor can style it.
+  const int16_t barWidth = static_cast<int16_t>(right - inset - SUB_PILL_GAP);
+  int16_t widths[SubBarSpec::MAX_ITEMS] = {};
+  int total = count > 0 ? (count - 1) * SUB_PILL_GAP : 0;
   for (int i = 0; i < count; ++i) {
-    pills[i].label = spec.labels[i];
-    pills[i].value = static_cast<int16_t>(i);
-    pills[i].selected = i == spec.selected;
+    widths[i] = static_cast<int16_t>(
+        screen.target().measureText(theme.bodyText.font, spec.labels[i], theme.bodyText).width + 2 * SUB_PILL_PAD_X);
+    total += widths[i];
   }
-  fui::TabBarProps props;
-  props.tabs = pills;
-  props.count = static_cast<uint16_t>(count);
-  props.action = ACTION_APP_SUBBAR;
-  props.inputMask = fui::InputTouch;
-  props.layout = fui::TabBarLayout::ContentWidth;
-  props.gap = SUB_PILL_GAP;
-  props.text = theme.bodyText;
-  props.tabInset = fui::Insets{static_cast<int16_t>((height - SUB_PILL_HEIGHT) / 2), 0,
-                               static_cast<int16_t>((height - SUB_PILL_HEIGHT) / 2), 0};
-  props.contentInset = fui::Insets{0, SUB_PILL_PAD_X, 0, SUB_PILL_PAD_X};
-  fui::StyleSet styles;
-  styles.explicitlySet = true;
-  styles.normal.background = fui::Paint::solid(fui::Color::White);
-  styles.normal.foreground = fui::Paint::solid(fui::Color::Black);
-  styles.normal.border = fui::Paint::solid(fui::Color::Black);
-  styles.normal.borderWidth = 1;
-  styles.normal.radius = SUB_PILL_RADIUS;
-  styles.selected = styles.normal;
-  styles.selected.background = fui::Paint::dither(fui::Color::LightGray);
-  styles.focused = styles.selected;
-  styles.active = styles.selected;
-  props.tabStyles = styles;
-  props.divider = false;
-  fui::tabBar(screen.frame(),
-              fui::Rect{inset, static_cast<int16_t>(top), static_cast<int16_t>(right - inset - SUB_PILL_GAP),
-                        static_cast<int16_t>(height - 1)},
-              props);
+  if (count > 0 && total > barWidth) {
+    for (int i = 0; i < count; ++i) widths[i] = static_cast<int16_t>((barWidth - (count - 1) * SUB_PILL_GAP) / count);
+  }
+  fui::StyleSet pillStyles;
+  pillStyles.explicitlySet = true;
+  pillStyles.normal.background = fui::Paint::solid(fui::Color::White);
+  pillStyles.normal.foreground = fui::Paint::solid(fui::Color::Black);
+  pillStyles.normal.border = fui::Paint::solid(fui::Color::Black);
+  pillStyles.normal.borderWidth = 1;
+  pillStyles.normal.radius = SUB_PILL_RADIUS;
+  pillStyles.selected = pillStyles.normal;
+  pillStyles.selected.background = fui::Paint::dither(fui::Color::LightGray);
+  pillStyles.focused = pillStyles.selected;
+  pillStyles.active = pillStyles.selected;
+  const fui::StyleSet pillCursorStyles = cursorStyles(SUB_PILL_RADIUS);
+
+  int16_t x = inset;
+  for (int i = 0; i < count; ++i) {
+    fui::TabItem pill;
+    pill.label = spec.labels[i];
+    pill.value = static_cast<int16_t>(i);
+    // The cursor wins over the current-section shade: it is drawn as selected.
+    pill.selected = i == spec.selected || i == spec.focused;
+    fui::TabBarProps props;
+    props.tabs = &pill;
+    props.count = 1;
+    props.action = ACTION_APP_SUBBAR;
+    props.inputMask = fui::InputTouch;
+    props.text = theme.bodyText;
+    props.tabInset = fui::Insets{static_cast<int16_t>((height - SUB_PILL_HEIGHT) / 2), 0,
+                                 static_cast<int16_t>((height - SUB_PILL_HEIGHT) / 2), 0};
+    props.contentInset = fui::Insets{0, SUB_PILL_PAD_X, 0, SUB_PILL_PAD_X};
+    props.tabStyles = i == spec.focused ? pillCursorStyles : pillStyles;
+    props.divider = false;
+    fui::tabBar(screen.frame(), fui::Rect{x, static_cast<int16_t>(top), widths[i], static_cast<int16_t>(height - 1)},
+                props);
+    x = static_cast<int16_t>(x + widths[i] + SUB_PILL_GAP);
+  }
   screen.target().fill(fui::Rect{0, static_cast<int16_t>(top + height - 1), static_cast<int16_t>(width), 1},
                        fui::Paint::solid(fui::Color::Black));
   return top + height;
@@ -258,7 +285,7 @@ void refreshLibraryCatalogEntry() { catalogEntry = CatalogEntry{OPDS_STORE.hasSe
 int librarySectionCount() { return catalogEntry.plugins || catalogEntry.opds ? 3 : 2; }
 
 int buildLibrarySubBar(UiScreen& screen, const GfxRenderer& renderer, const int top, const LibrarySection selected,
-                       const freeink::Icon* const* trailing, const int trailingCount) {
+                       const freeink::Icon* const* trailing, const int trailingCount, const int focused) {
   SubBarSpec spec;
   spec.labels[0] = tr(STR_LIBRARY);
   spec.labels[1] = tr(STR_FILES);
@@ -269,14 +296,19 @@ int buildLibrarySubBar(UiScreen& screen, const GfxRenderer& renderer, const int 
   spec.selected = static_cast<int>(selected);
   spec.trailingCount = std::min(trailingCount, SubBarSpec::MAX_TRAILING);
   for (int i = 0; trailing && i < spec.trailingCount; ++i) spec.trailing[i] = trailing[i];
+  spec.focused = focused;
   return buildSubBar(screen, renderer, top, spec);
 }
 
-int handleLibrarySubBarAction(const fui::ActionEvent& event, const LibrarySection current) {
+namespace {
+// Section a button switch asked the next library screen to focus.
+int pendingSubBarFocus = -1;
+
+int activateLibrarySubBarItem(const int value, const LibrarySection current) {
   const int sections = librarySectionCount();
-  if (event.value >= sections) return event.value - sections;
-  if (event.value == static_cast<int>(current)) return -1;
-  switch (static_cast<LibrarySection>(event.value)) {
+  if (value >= sections) return value - sections;
+  if (value == static_cast<int>(current)) return -1;
+  switch (static_cast<LibrarySection>(value)) {
     case LibrarySection::Books:
       activityManager.goToLibrary();
       break;
@@ -292,6 +324,52 @@ int handleLibrarySubBarAction(const fui::ActionEvent& event, const LibrarySectio
       break;
   }
   return -1;
+}
+}  // namespace
+
+int handleLibrarySubBarAction(const fui::ActionEvent& event, const LibrarySection current) {
+  return activateLibrarySubBarItem(event.value, current);
+}
+
+LibrarySubBarInput handleLibrarySubBarButtons(MappedInputManager& input, int& cursor, const LibrarySection current,
+                                              const int trailingCount) {
+  using Button = MappedInputManager::Button;
+  LibrarySubBarInput result;
+  const int last = librarySectionCount() + trailingCount - 1;
+  if (input.wasPressed(Button::NavPrevious)) {
+    if (cursor > 0) --cursor;
+    result.consumed = true;
+  } else if (input.wasPressed(Button::NavNext)) {
+    if (cursor < last) {
+      ++cursor;
+    } else {
+      cursor = -1;
+      result.left = true;
+    }
+    result.consumed = true;
+  } else if (input.wasReleased(Button::Back)) {
+    cursor = -1;
+    result.left = true;
+    result.consumed = true;
+  } else if (input.wasReleased(Button::Confirm)) {
+    const int value = cursor;
+    // The Catalogs screens have no sub-bar to land on.
+    if (value < librarySectionCount() && value != static_cast<int>(current) &&
+        static_cast<LibrarySection>(value) != LibrarySection::Catalogs) {
+      pendingSubBarFocus = value;
+    }
+    result.trailing = activateLibrarySubBarItem(value, current);
+    result.consumed = true;
+  } else if (input.wasPressed(Button::Confirm) || input.wasPressed(Button::Back)) {
+    result.consumed = true;  // its release acts above
+  }
+  return result;
+}
+
+int takeLibrarySubBarFocus(const LibrarySection section) {
+  const int focus = pendingSubBarFocus == static_cast<int>(section) ? pendingSubBarFocus : -1;
+  pendingSubBarFocus = -1;
+  return focus;
 }
 
 }  // namespace appnav

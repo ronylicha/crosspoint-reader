@@ -165,6 +165,10 @@ class LibraryListActivity final : public UiTabListActivity {
   // row 0 as the working selection exactly as the pre-ring code did.
   int selectedEntry() const;
   bool tabsFocused() const { return ringPos() == 0; }
+  bool tabBandFocused() const override { return tabsFocused() && subBarCursor < 0; }
+  int subBarTrailingCount() const;
+  // Search or rebuild, the sub-bar's trailing buttons.
+  void activateSubBarButton(int trailing);
 
   // --- pinned recently-opened overlay ---------------------------------------
   // On the unfiltered Recent shelf the RecentBooksStore entries sit on top, in
@@ -238,6 +242,9 @@ class LibraryListActivity final : public UiTabListActivity {
   freeink::ui::ListProps shelfNavigation{};
   // The page's covers, decoded once per page and drawn from memory.
   coverstore::CoverSet shelfCovers;
+  // Button cursor in the Library | Files sub-bar, -1 when the screen below
+  // has the focus.
+  int subBarCursor = -1;
   // Neighbour pages still to warm, next page first; -1 when done.
   std::array<int, 2> prefetchTops{-1, -1};
   unsigned long shelfShownAtMs = 0;

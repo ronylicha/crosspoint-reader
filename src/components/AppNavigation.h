@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "MappedInputManager.h"
 #include "activities/AppTab.h"
 #include "components/UiAppHost.h"
 #include "components/themes/BaseTheme.h"
@@ -67,6 +68,9 @@ struct SubBarSpec {
   const char* labels[MAX_ITEMS]{};
   int count = 0;
   int selected = -1;
+  // Button cursor: an index over the pills then the trailing buttons, -1 for
+  // none. The focused element is drawn inverted.
+  int focused = -1;
   const freeink::Icon* trailing[MAX_TRAILING]{};
   int trailingCount = 0;
 };
@@ -81,9 +85,25 @@ enum class LibrarySection : uint8_t { Books, Files, Catalogs };
 void refreshLibraryCatalogEntry();
 int librarySectionCount();
 int buildLibrarySubBar(UiScreen& screen, const GfxRenderer& renderer, int top, LibrarySection selected,
-                       const freeink::Icon* const* trailing = nullptr, int trailingCount = 0);
+                       const freeink::Icon* const* trailing = nullptr, int trailingCount = 0, int focused = -1);
 // Handles an ACTION_APP_SUBBAR event of the library sub-bar: switches section
 // for a pill tap and returns -1; for a trailing button returns its index.
 int handleLibrarySubBarAction(const freeink::ui::ActionEvent& event, LibrarySection current);
+
+// Button boards reach the library sub-bar with Previous from the top of the
+// screen. The cursor walks the pills then the trailing buttons; Next past the
+// last item and Back hand the focus back to the screen.
+struct LibrarySubBarInput {
+  bool consumed = false;  // the input belonged to the sub-bar
+  bool left = false;      // the cursor left the sub-bar
+  int trailing = -1;      // a trailing button to activate, -1 for none
+};
+// Call only while `cursor` >= 0. A switched section opens with its cursor
+// on its own pill (see takeLibrarySubBarFocus).
+LibrarySubBarInput handleLibrarySubBarButtons(MappedInputManager& input, int& cursor, LibrarySection current,
+                                              int trailingCount);
+// Cursor a library screen starts with: its own pill after a button switch,
+// -1 otherwise. Consumes the request.
+int takeLibrarySubBarFocus(LibrarySection section);
 
 }  // namespace appnav

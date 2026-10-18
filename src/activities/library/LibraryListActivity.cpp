@@ -157,6 +157,7 @@ void LibraryListActivity::onEnter() {
   appnav::registerTabs(app, AppTab::Library);
   app.on(appnav::ACTION_APP_SUBBAR, &LibraryListActivity::subBarActionTrampoline, this);
   app.on(ACTION_CONTEXT_BACK, &LibraryListActivity::contextBackTrampoline, this);
+  subBarCursor = appnav::takeLibrarySubBarFocus(appnav::LibrarySection::Books);
 
   // Recent is backed by the resident store. Prune before opening the index so
   // its persistence write never overlaps the long-lived index reader.
@@ -1075,13 +1076,19 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
 void LibraryListActivity::subBarActionTrampoline(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<LibraryListActivity*>(user);
   const int trailing = appnav::handleLibrarySubBarAction(event, appnav::LibrarySection::Books);
-  if (trailing < 0) return;
+  if (trailing >= 0) self->activateSubBarButton(trailing);
+}
+
+int LibraryListActivity::subBarTrailingCount() const {
+  return mappedInput.hasTouch() ? TOUCH_TRAILING_COUNT : BUTTON_TRAILING_COUNT;
+}
+
+void LibraryListActivity::activateSubBarButton(const int trailing) {
   // Search is always the outermost trailing button.
-  const int searchIndex = (self->mappedInput.hasTouch() ? TOUCH_TRAILING_COUNT : BUTTON_TRAILING_COUNT) - 1;
-  if (trailing == searchIndex) {
-    self->openSearch();
+  if (trailing == subBarTrailingCount() - 1) {
+    openSearch();
   } else {
-    self->promptRebuildIndex();
+    promptRebuildIndex();
   }
 }
 
@@ -1103,6 +1110,20 @@ bool LibraryListActivity::handleCustomInput() {
   if (lockNextBackRelease && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     lockNextBackRelease = false;
     return true;
+  }
+
+  if (subBarCursor >= 0) {
+    int cursor = subBarCursor;
+    const auto input =
+        appnav::handleLibrarySubBarButtons(mappedInput, cursor, appnav::LibrarySection::Books, subBarTrailingCount());
+    if (input.trailing >= 0) cursor = -1;  // back to the strip once the action returns
+    {
+      RenderLock lock(*this);
+      subBarCursor = cursor;
+    }
+    if (input.trailing >= 0) activateSubBarButton(input.trailing);
+    if (input.consumed) requestUpdate();
+    return input.consumed;
   }
 
   return false;
@@ -1156,9 +1177,15 @@ void LibraryListActivity::navigateButtons() {
       moveRingTo(ringPos() <= 1 ? count : ringPos() - 1);
     }
   });
-  // Search is an activation: defer it so holding Previous can still step tabs.
+  // Climbing to the sub-bar waits for the release so holding Previous can
+  // still step tabs. The sub-bar holds Library | Files and Search.
   buttonNavigator.onPreviousRelease([this] {
-    if (navigationStartedOnTabs && tabsFocused()) openSearch();
+    if (!navigationStartedOnTabs || !tabsFocused()) return;
+    {
+      RenderLock lock(*this);
+      subBarCursor = static_cast<int>(appnav::LibrarySection::Books);
+    }
+    requestUpdate();
   });
   // A held button steps tabs while the strip has focus (the base behaviour
   // Settings keeps) and page-jumps once the selection is down in the rows,
@@ -1594,7 +1621,7 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
   const bool touch = mappedInput.hasTouch();
   const int subBarBottom = appnav::buildLibrarySubBar(
       screen, renderer, appnav::contentTop(renderer), appnav::LibrarySection::Books,
-      touch ? TOUCH_TRAILING_ICONS : BUTTON_TRAILING_ICONS, touch ? TOUCH_TRAILING_COUNT : BUTTON_TRAILING_COUNT);
+      touch ? TOUCH_TRAILING_ICONS : BUTTON_TRAILING_ICONS, subBarTrailingCount(), subBarCursor);
   // The sort strip starts below the context row.
   const int contentTop = buildContextRow(screen, subBarBottom);
   screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(contentTop), 0,
@@ -1709,12 +1736,16 @@ void LibraryListActivity::drawFooter() {
   drawPositionReadout();
   drawHoldHelp();
 
+  if (subBarCursor >= 0) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
   const bool backGoesHome =
       tabsFocused() && !groupsCollapsed && query.empty() && !(seriesTabActive() && selectedSeriesGroup >= 0);
   const char* backLabel = backGoesHome ? tr(STR_HOME) : tr(STR_BACK);
   const char* confirmLabel = groupsCollapsed ? tr(STR_SELECT) : tr(STR_OPEN);
-  const bool canSearch = tabsFocused();
-  const auto labels = mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel,
-                                            canSearch ? tr(STR_SEARCH) : tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }

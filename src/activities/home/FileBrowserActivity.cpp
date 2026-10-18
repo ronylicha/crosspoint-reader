@@ -205,6 +205,7 @@ void FileBrowserActivity::onEnter() {
     appnav::registerTabs(app, AppTab::Library);
     app.on(appnav::ACTION_APP_SUBBAR, &FileBrowserActivity::onSubBarAction, this);
     app.on(ACTION_FOLDER_UP, &FileBrowserActivity::onFolderUpAction, this);
+    subBarCursor = appnav::takeLibrarySubBarFocus(appnav::LibrarySection::Files);
   }
 
   fileNameBuffer = makeUniqueNoThrow<char[]>(NAME_BUFFER_SIZE);
@@ -518,6 +519,18 @@ bool FileBrowserActivity::handleCustomInput() {
   // The modal popup owns every input while open, chrome taps included.
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
+  if (subBarCursor >= 0) {
+    // No trailing buttons on this sub-bar.
+    int cursor = subBarCursor;
+    const auto input = appnav::handleLibrarySubBarButtons(mappedInput, cursor, appnav::LibrarySection::Files, 0);
+    {
+      RenderLock lock(*this);
+      subBarCursor = cursor;
+    }
+    if (input.consumed) requestUpdate();
+    return input.consumed;
+  }
+
   // Long press BACK (1s+) goes to root folder (Books mode only).
   // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
   if (mode == Mode::Books && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
@@ -571,6 +584,21 @@ bool FileBrowserActivity::handleButtons() {
   return false;
 }
 
+void FileBrowserActivity::navigateButtons() {
+  // Previous from the first row (or an empty folder) climbs to the sub-bar,
+  // the only way to Library on button boards.
+  if (mode == Mode::Books && mappedInput.wasPressed(MappedInputManager::Button::NavPrevious) &&
+      (listCount() == 0 || nav.selected <= 0)) {
+    {
+      RenderLock lock(*this);
+      subBarCursor = static_cast<int>(appnav::LibrarySection::Files);
+    }
+    requestUpdate();
+    return;
+  }
+  UiListActivity::navigateButtons();
+}
+
 void FileBrowserActivity::goUpFolder() {
   if (basepath == "/") return;
   const std::string oldPath = basepath;
@@ -622,7 +650,8 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   int listTop = metrics.topPadding + metrics.headerHeight;  // below PickFirmware's titled header
   if (mode == Mode::Books) {
     appnav::buildChrome(screen, renderer, AppTab::Library);
-    listTop = appnav::buildLibrarySubBar(screen, renderer, appnav::contentTop(renderer), appnav::LibrarySection::Files);
+    listTop = appnav::buildLibrarySubBar(screen, renderer, appnav::contentTop(renderer), appnav::LibrarySection::Files,
+                                         nullptr, 0, subBarCursor);
     if (basepath != "/") {
       buildFolderRow(screen, listTop);
       listTop += FOLDER_ROW_HEIGHT;
@@ -725,14 +754,20 @@ const char* FileBrowserActivity::headerTitle() const {
 }
 
 void FileBrowserActivity::drawFooter() {
+  if (subBarCursor >= 0) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
   const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
   // In PickFirmware mode, Confirm on a .bin returns the path to the caller (not "open"); show
   // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
   const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && nav.selected >= 0 &&
                                      nav.selected < listCount() && files[nav.selected].back() != '/';
   const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
-  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
-                                            files.empty() ? "" : tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(backLabel, confirmLabel, files.empty() && mode != Mode::Books ? "" : tr(STR_DIR_UP),
+                            files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

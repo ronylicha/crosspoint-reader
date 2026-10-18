@@ -26,6 +26,9 @@ class FileBrowserActivity final : public UiListActivity {
 
   // Files state
   std::string basepath = "/";
+  // Button cursor in the Library | Files sub-bar (Books mode), -1 when the
+  // list has the focus.
+  int subBarCursor = -1;
   std::vector<std::string> files;
   std::unique_ptr<char[]> fileNameBuffer;
   OptionPopup optionPopup;
@@ -59,6 +62,8 @@ class FileBrowserActivity final : public UiListActivity {
   // file actions.
   bool handleCustomInput() override;
   bool handleButtons() override;
+  // Books mode: Previous from the top row climbs to the sub-bar.
+  void navigateButtons() override;
   // PickFirmware keeps the titled header; Books builds its chrome in buildScreen.
   const char* headerTitle() const override;
   // Footer labels depend on path depth and picker mode.

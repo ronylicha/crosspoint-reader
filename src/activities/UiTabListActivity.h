@@ -47,6 +47,9 @@ class UiTabListActivity : public UiListActivity {
   freeink::ui::ListNav& activeNav() override;
   // Ring position of the active tab (0 = tab bar) for const contexts.
   int ringPos() const;
+  // Whether the tab band is drawn focused; a screen with a cursor elsewhere
+  // (a bar above the band) withdraws it.
+  virtual bool tabBandFocused() const { return ringPos() == 0; }
   // ACTION_ROW lands as ring = row + 1, then activateIndex(row).
   void onRowAction(const freeink::ui::ActionEvent& event) override;
   // Press walks the ring; continuous hold steps the tab.
