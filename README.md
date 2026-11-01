@@ -2,7 +2,7 @@
 
 > Fork communautaire de [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) : **nouvelle interface à onglets**, **accueil épuré**, **statistiques de lecture**, **bibliothèque refondue** (étagères de couvertures, séries) et, sur le **Xteink X4 Pro** tactile, un **menu Jeux** avec **Échecs**, **Dames** et **Backgammon**.
 
-**Version actuelle : 1.6.5-games.11** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11).
+**Version actuelle : 1.6.5-games.12** — basée sur CrossPoint Reader officiel **1.6.5**. Téléchargement : [release v1.6.5-games.12](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.12).
 
 | Fichier | Liseuse |
 |---|---|
@@ -73,14 +73,14 @@ Le quatrième onglet **Séries** affiche des dossiers avec leur nom et leur nomb
 
 Activez **Réglages → Système → Utiliser les métadonnées** pour lire les séries et tomes renseignés dans les EPUB. Après un transfert ou une modification de ces informations, reconstruisez l'index. À la première ouverture avec Séries, l'ancien index est mis à jour automatiquement en conservant l'ordre d'arrivée des livres déjà connus. Si les métadonnées sont désactivées, les livres apparaissent dans **Sans série** après reconstruction.
 
-Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format, taille, série et tome. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD, et leur image décodée est rangée dans un fichier par taille de vignette : une page dont les couvertures sont prêtes s'affiche en une seule fois, et déplacer la sélection ne relit plus la carte. Sur X4 Pro, les couvertures vues restent en mémoire pendant la session et celles des pages voisines sont préchargées. Une couverture absente garde une vignette de remplacement. La construction de l'index et la préparation des couvertures manquantes affichent une barre de progression.
+Un appui court ouvre le livre. Un appui long sur sa couverture, ou **Confirmer maintenu pendant une seconde**, ouvre une fiche avec les informations disponibles : titre, auteur, nom du fichier, chemin sur la carte SD, format, taille, série et tome. La fiche donne accès à l'ouverture, à la suppression avec confirmation, à la réindexation et au retrait des récents lorsque le livre figure dans l'historique. Les vignettes sont conservées sur la carte SD, et leur image décodée est rangée dans un fichier par taille de vignette : une page dont les couvertures sont prêtes s'affiche en une seule fois, et déplacer la sélection ne relit plus la carte. Sur X4 Pro, les couvertures vues restent en mémoire pendant la session et celles des pages voisines sont préchargées. Une couverture absente garde une vignette de remplacement, tout comme une couverture JPEG en sous-échantillonnage 4:1:1, que le décodeur ne sait pas lire : elle est refusée avant le décodage et n'est plus retentée. La construction de l'index et la préparation des couvertures manquantes affichent une barre de progression.
 
 Commandes et essais sur appareil : [docs/bibliotheque.md](./docs/bibliotheque.md).
 
-Validation de la version 1.6.5-games.11 : **590 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
+Validation de la version 1.6.5-games.12 : **594 tests hôte passent**. Les compilations `x4pro` et `gh_release` réussissent sans avertissement ; le firmware X4/X3 ne contient aucun symbole de jeu. Tailles et SHA-256 des binaires publiés :
 
-- `firmware-x4pro-jeux.bin` : **5 935 920 octets**, `2ecfaf45cf1646d75efc7bc56bede19ceed24e98eadb7274907422c29ad6a202`
-- `firmware-x4.bin` : **5 813 552 octets**, `a20dcabdf0eb8102aa80823dd3c787e1a1c9937baea7755d465579df82363bc8`
+- `firmware-x4pro-jeux.bin` : **5 936 384 octets**, `1bfb800a8f8b54fb54d67af0ebc5459c112ae22f0d508f62c00f1b773ca6dcee`
+- `firmware-x4.bin` : **5 814 176 octets**, `692892753451b057c4345e84507f7a2ea736d1909245f1f7ed3649861ef8dcb7`
 
 ## Fonctionnalités CrossPoint (base officielle 1.6.5)
 

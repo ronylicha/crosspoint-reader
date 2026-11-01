@@ -28,6 +28,9 @@ Fork communautaire de CrossPoint Reader, basé sur la release officielle **${UPS
 - **Sans réseau**, les positions sont conservées sur la carte SD, une par livre (jusqu'à 12), et partent toutes à la connexion suivante.
 - **X4 Pro** : envoi en tâche de fond dès la fermeture du livre, pendant que la liseuse reste utilisable. **X4/X3** : envoi au moment de la mise en veille, pour préserver la mémoire pendant la lecture.
 
+## Corrections
+- **Plus de redémarrage du X4 Pro sur certaines couvertures** : une image JPEG en sous-échantillonnage 4:1:1 faisait diviser le décodeur par zéro, ce qui redémarrait le X4 Pro pendant la préparation des couvertures de la bibliothèque. Ces images sont désormais refusées avant le décodage : le livre garde une vignette de remplacement et n'est plus retenté. Les mêmes images, dans le texte d'un livre ou en écran de veille, sont ignorées au lieu de planter. Sur X4/X3, ces images ne plantaient pas mais produisaient un fichier vide, sans aucune ligne d'image.
+
 ## Jeux (écrans tactiles uniquement)
 - **Échecs**, **Dames internationales 10×10** et **Backgammon**, en 2 joueurs ou contre l'IA, avec reprise des parties.
 - Les jeux ne sont inclus que dans le firmware des liseuses tactiles (X4 Pro).

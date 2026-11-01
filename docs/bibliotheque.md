@@ -1,6 +1,6 @@
 # Bibliothèque : couvertures sur étagères
 
-La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
+La bibliothèque sur étagères et l'onglet **Séries** font partie de la [release v1.6.5-games.12](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.12), pour le X4 Pro (`firmware-x4pro-jeux.bin`) comme pour les X4/X3 (`firmware-x4.bin`). Les essais sur liseuse restent à effectuer.
 
 ## Accès
 

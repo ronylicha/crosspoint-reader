@@ -134,7 +134,7 @@ The Browse Files screen acts as a file and folder browser. Open it from the **Li
 
 ### 3.4 Library Screen
 
-The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. A book with a volume number carries a badge in its cover's top-right corner (**#3**, or **T3** in French). The shelves and the **Series** tab are part of [release v1.6.5-games.11](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.11), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
+The Library indexes up to 4,096 supported books on the SD card. This fork's shelf redesign shows up to **12 covers per page: four columns on three shelves**, with a frame around the selected book. A book with a volume number carries a badge in its cover's top-right corner (**#3**, or **T3** in French). The shelves and the **Series** tab are part of [release v1.6.5-games.12](https://github.com/ronylicha/crosspoint-reader/releases/tag/v1.6.5-games.12), for the X4 Pro (`firmware-x4pro-jeux.bin`) and for the X4/X3 (`firmware-x4.bin`). Checks on the reader remain necessary.
 
 Four tabs organise the books; their labels use the small font so that each one stays whole beside its sort arrow. The arrow beside the active tab shows the sort direction:
 
