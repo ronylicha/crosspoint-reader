@@ -947,6 +947,7 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
     int THUMB_TARGET_HEIGHT = height;
     const bool success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverJpg, thumbBmp, THUMB_TARGET_WIDTH,
                                                                              THUMB_TARGET_HEIGHT);
+    const bool unsupported = !success && JpegToBmpConverter::hasUnsupportedLayout(coverJpg);
     // Explicitly close() files before calling Storage.remove()
     coverJpg.close();
     thumbBmp.close();
@@ -957,7 +958,8 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
       Storage.remove(getThumbBmpPath(height).c_str());
     }
     LOG_DBG("EBP", "Generated thumb BMP from JPG cover image, success: %s", success ? "yes" : "no");
-    return success;
+    // A layout the decoder can never read falls through to the no-retry marker.
+    if (!unsupported) return success;
   } else if (FsHelpers::hasPngExtension(coverImageHref)) {
     LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
     const auto coverPngTempPath = getCachePath() + "/.cover.png";

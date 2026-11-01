@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include "BitmapHelpers.h"
+#include "JpegSupport.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
@@ -508,7 +509,41 @@ int bmpDrawCallback(JPEGDRAW* pDraw) {
   return ctx->error ? 0 : 1;
 }
 
+constexpr int MAX_IMAGE_WIDTH = 2048;
+constexpr int MAX_IMAGE_HEIGHT = 3072;
+
+// False for a layout this converter can never handle, whatever the free memory.
+bool layoutSupported(JPEGDEC& jpeg) {
+  const int width = jpeg.getWidth();
+  const int height = jpeg.getHeight();
+  if (width <= 0 || height <= 0 || width > MAX_IMAGE_WIDTH || height > MAX_IMAGE_HEIGHT) {
+    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", width, height, MAX_IMAGE_WIDTH,
+            MAX_IMAGE_HEIGHT);
+    return false;
+  }
+  if (!jpegSubsamplingSupported(jpeg.getSubSample())) {
+    LOG_ERR("JPG", "Unsupported JPEG subsampling 0x%02X", jpeg.getSubSample());
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
+
+bool JpegToBmpConverter::hasUnsupportedLayout(HalFile& jpegFile) {
+  s_jpegFile = &jpegFile;
+  const auto jpeg = makeUniqueNoThrow<JPEGDEC>();
+  if (!jpeg) {
+    LOG_ERR("JPG", "OOM: JPEG decoder");
+    return false;
+  }
+  // Only a header that parses can prove the layout is unsupported; any other
+  // failure may be transient.
+  if (jpeg->open("", bmpJpegOpen, bmpJpegClose, bmpJpegRead, bmpJpegSeek, nullptr) != 1) return false;
+  const bool supported = layoutSupported(*jpeg);
+  jpeg->close();
+  return !supported;
+}
 
 // Internal implementation with configurable target size and bit depth
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& bmpOut, int targetWidth,
@@ -550,14 +585,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& b
     LOG_DBG("JPG", "Progressive JPEG decode uses 1/8 source: %dx%d", decodedSrcWidth, decodedSrcHeight);
   }
 
-  constexpr int MAX_IMAGE_WIDTH = 2048;
-  constexpr int MAX_IMAGE_HEIGHT = 3072;
-
-  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > MAX_IMAGE_WIDTH || srcHeight > MAX_IMAGE_HEIGHT) {
-    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", srcWidth, srcHeight, MAX_IMAGE_WIDTH,
-            MAX_IMAGE_HEIGHT);
-    return false;
-  }
+  if (!layoutSupported(*jpeg)) return false;
 
   // Calculate output dimensions (pre-scale to fit display exactly)
   int outWidth = srcWidth;

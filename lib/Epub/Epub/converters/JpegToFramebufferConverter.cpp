@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <JPEGDEC.h>
+#include <JpegSupport.h>
 #include <Logging.h>
 #include <Memory.h>
 
@@ -356,6 +357,12 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   return 1;
 }
 
+bool subsamplingSupported(JPEGDEC& jpeg, const std::string& imagePath) {
+  if (jpegSubsamplingSupported(jpeg.getSubSample())) return true;
+  LOG_ERR("JPG", "Unsupported JPEG subsampling 0x%02X: %s", jpeg.getSubSample(), imagePath.c_str());
+  return false;
+}
+
 }  // namespace
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
@@ -380,6 +387,7 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
 
   const int width = jpeg->getWidth();
   const int height = jpeg->getHeight();
+  if (!subsamplingSupported(*jpeg, imagePath)) return false;
   if (!validateAndStoreDimensions(width, height, out, "JPEG")) return false;
   LOG_DBG("JPG", "Image dimensions: %dx%d", width, height);
 
@@ -415,6 +423,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     return false;
   }
 
+  if (!subsamplingSupported(*jpeg, imagePath)) return false;
   ImageDimensions sourceDimensions;
   if (!validateAndStoreDimensions(jpeg->getWidth(), jpeg->getHeight(), sourceDimensions, "JPEG")) return false;
   const int srcWidth = sourceDimensions.width;
